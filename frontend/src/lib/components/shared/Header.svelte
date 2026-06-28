@@ -1,6 +1,8 @@
 <script lang="ts">
-  export let userName = "Admin User";
-  export let role = "SYSTEM ROOT";
+  let { 
+    userName = "Admin User", 
+    role = "SYSTEM ROOT" 
+  } = $props();
 </script>
 
 <header class="top-header">
