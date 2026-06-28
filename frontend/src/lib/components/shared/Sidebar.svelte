@@ -1,5 +1,7 @@
 <script lang="ts">
-  export let activePage = "Dashboard";
+  let { 
+    activePage = "Dashboard" 
+  } = $props();
 </script>
 
 <aside class="sidebar">
