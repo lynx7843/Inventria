@@ -1,7 +1,7 @@
 # 📦 Inventria - Inventory Management System
 
-A desktop-based Inventory Management System developed using C# Windows Forms in Microsoft Visual Studio, designed to help manage products, stock levels, and inventory operations efficiently.  
-The system is connected to a local MongoDB database, ensuring fast and flexible data storage without the complexity of traditional relational databases.
+A warehouse management system built with a SvelteKit frontend and an ASP.NET Core 9 backend, designed to help manage products, stock levels, and inventory operations efficiently.  
+The system is connected to a Microsoft SQL Server database for fast, reliable, and structured data storage.
 
 ## 🚀 Features
 * **Add** new products to inventory
@@ -10,55 +10,80 @@ The system is connected to a local MongoDB database, ensuring fast and flexible 
 * **Delete** products
 * **Track** stock levels
 * **Categorize** inventory items
-* **Fast** local database access using MongoDB
-* **Simple** and user-friendly Windows Forms UI
+* **Role-based** access for Employee and Admin views
+* **Fast** and reliable data access using Microsoft SQL Server
+* **Simple** and user-friendly web UI
 
 ## 🛠 Tech Stack
 
+**The High-Performance Fullstack** (SvelteKit + ASP.NET Core 9 + Microsoft SQL Server)
+
 | Technology | Description |
 | :--- | :--- |
-| **C#** | Core programming language |
-| **Windows Forms** | Desktop UI Framework |
-| **Visual Studio** | Development Environment |
-| **MongoDB** | NoSQL Local Database |
-| **MongoDB.Driver** | C# Driver for MongoDB |
+| **SvelteKit** | Frontend Framework |
+| **TypeScript** | Frontend Language |
+| **ASP.NET Core 9** | Backend Framework |
+| **C#** | Backend Language |
+| **Microsoft SQL Server** | Relational Database |
+
+## 📁 Project Structure
+
+```
+frontend/
+├── src/
+│   ├── lib/
+│   │   └── components/
+│   │       ├── shared/             <-- Reusable UI building blocks
+│   │       │   ├── InputField.svelte
+│   │       │   └── Button.svelte
+│   │       ├── login/              <-- Isolated pieces only used in Login
+│   │       │   └── LoginForm.svelte
+│   │       ├── employee/           <-- Isolated pieces for Employee view
+│   │       │   └── ShiftCard.svelte
+│   │       └── admin/              <-- Isolated pieces for Admin view
+│   │           └── SystemSettings.svelte
+│   │
+│   ├── routes/                     <-- Defines your actual URLs/Pages
+│   │   ├── +layout.svelte          <-- Global styles, fonts, or themes
+│   │   ├── +page.svelte            <-- The Login Page (Root URL: /)
+│   │   ├── employee/
+│   │   │   └── +page.svelte        <-- The Employee Dashboard Page (/employee)
+│   │   └── admin/
+│   │       └── +page.svelte        <-- The Admin Dashboard Page (/admin)
+│   │
+│   └── app.html
+├── package.json
+└── svelte.config.js
+```
 
 ## ⚙️ Requirements
 Before running the project, ensure you have the following installed on your system:
-* ✔️ Visual Studio
-* ✔️ .NET Framework
-* ✔️ MongoDB Local Server
+* ✔️ Node.js
+* ✔️ .NET 9 SDK
+* ✔️ Microsoft SQL Server
 
 ## ▶️ Getting Started
 
-### 1. MongoDB Setup
-Once MongoDB is installed, open your terminal or command prompt and start the server by running:
+### 1. Clone the Repository
 ```bash
-mongod
-Default connection: mongodb://localhost:27017
+git clone https://github.com/lynx7843/Inventria.git
+```
 
-Database Name: InventoryDB
+### 2. Frontend Setup
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-2. Running the Application
-Clone the repository to your local machine:
+### 3. Backend Setup
+Open the backend solution file in Visual Studio, restore the NuGet packages, and update the connection string to point to your local SQL Server instance.  
+Press Start (F5) to build and run the API.
 
-Bash
-git clone [https://github.com/lynx7843/Inventria.git](https://github.com/lynx7843/Inventria.git)
-Open the InventoryManagementSystem.sln solution file in Visual Studio.
-
-Restore the necessary NuGet packages (ensure MongoDB.Driver is installed).
-
-Press Start (F5) to build and run the project.
-
-🔐 Future Improvements
-[ ] User authentication
-
-[ ] Sales tracking
-
-[ ] Supplier management
-
-[ ] Report generation
-
-[ ] Barcode scanning
-
-[ ] Cloud database support
+## 🔐 Future Improvements
+* [ ] User authentication
+* [ ] Sales tracking
+* [ ] Supplier management
+* [ ] Report generation
+* [ ] Barcode scanning
+* [ ] Cloud database support
