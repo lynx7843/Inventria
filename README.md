@@ -87,3 +87,16 @@ Press Start (F5) to build and run the API.
 * [ ] Report generation
 * [ ] Barcode scanning
 * [ ] Cloud database support
+
+### 📷 Preview
+
+> _Screenshots_
+
+<div>
+  <table>
+    <tr>
+      <td><img src="img/signin.jpeg" alt="Login"><br><b>Login</b></td>
+      <td><img src="img/admin_dashboard.jpeg" alt="Status"><br><b>Admin Dashboard</b></td>
+    </tr>
+  </table>
+</div>
