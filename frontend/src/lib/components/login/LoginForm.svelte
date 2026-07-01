@@ -66,7 +66,7 @@
 </form>
 
 <style>
-  .password-header { display: flex; justify-content: space-between; margin-bottom: -1rem; position: relative; z-index: 1; }
+  .password-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
   .password-header label { font-size: 0.75rem; font-weight: 600; color: #475569; letter-spacing: 0.5px; }
   .forgot { font-size: 0.75rem; color: #0b6b36; text-decoration: none; }
   .checkbox-group { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2rem; margin-top: -0.5rem; }
