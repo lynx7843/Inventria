@@ -1,11 +1,12 @@
+using Inventria.Models;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Add database connection
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<InventriaDbContext>(options =>
     options.UseSqlServer(connectionString));
-
-builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
