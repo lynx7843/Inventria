@@ -3,17 +3,29 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add database connection
+// 1. Add CORS policy
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowSvelteFrontend",
+        policy =>
+        {
+            policy.WithOrigins("http://localhost:5173") // Your SvelteKit URL
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        });
+});
+
+// 2. Add database connection
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<InventriaDbContext>(options =>
     options.UseSqlServer(connectionString));
 
-// Add this under your DbContext configuration
+// 3. Add Controller support
 builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// Configure the HTTP request pipeline for development
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -21,31 +33,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+// 4. Apply CORS policy (Must be before MapControllers)
+app.UseCors("AllowSvelteFrontend");
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
-
-// Add this right before app.Run();
+// 5. Map the API controllers (like AuthController)
 app.MapControllers();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
