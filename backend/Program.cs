@@ -8,6 +8,9 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<InventriaDbContext>(options =>
     options.UseSqlServer(connectionString));
 
+// Add this under your DbContext configuration
+builder.Services.AddControllers();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -36,6 +39,9 @@ app.MapGet("/weatherforecast", () =>
     return forecast;
 })
 .WithName("GetWeatherForecast");
+
+// Add this right before app.Run();
+app.MapControllers();
 
 app.Run();
 
