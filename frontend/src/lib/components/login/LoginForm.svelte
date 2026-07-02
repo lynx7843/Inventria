@@ -14,17 +14,33 @@
     errorMsg = '';
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 800)); 
+      // Send the real request to your ASP.NET Core 9 backend
+      const response = await fetch('http://localhost:5240/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
       
-      if (username.toLowerCase() === 'admin' && password === '123') {
+      // If the backend returns a 401 Unauthorized, trigger the error
+      if (!response.ok) {
+        throw new Error('Invalid username or password.');
+      }
+      
+      // If successful, parse the response data
+      const data = await response.json();
+      
+      // Route the user based on the secure role returned from SQL Server
+      if (data.role === 'Admin') {
         goto('/admin');
-      } else if (username.toLowerCase() === 'employee' && password === '123') {
+      } else if (data.role === 'Employee') {
         goto('/employee');
       } else {
-        errorMsg = 'Invalid username or password.';
+        errorMsg = 'Unrecognized user role.';
       }
+
     } catch (err) {
-      errorMsg = 'Failed to connect to the database.';
+      // Catch network errors (like the backend being turned off) or invalid credentials
+      errorMsg = err instanceof Error ? err.message : 'Failed to connect to the database.';
     } finally {
       isLoading = false;
     }
