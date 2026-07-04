@@ -1,6 +1,29 @@
 <script lang="ts">
   import Sidebar from '$lib/components/shared/Sidebar.svelte';
   import Header from '$lib/components/shared/Header.svelte';
+  import { onMount } from 'svelte';
+
+  // State variables for our data
+  let inventoryItems = $state([]);
+  let isLoading = $state(true);
+  let errorMsg = $state('');
+
+  // Fetch data as soon as the page loads
+  onMount(async () => {
+    try {
+      const response = await fetch('http://localhost:5240/api/inventory');
+      
+      if (!response.ok) {
+        throw new Error('Failed to load inventory data.');
+      }
+      
+      inventoryItems = await response.json();
+    } catch (err) {
+      errorMsg = err instanceof Error ? err.message : 'Unknown error occurred.';
+    } finally {
+      isLoading = false;
+    }
+  });
 </script>
 
 <Sidebar activePage="Dashboard" />
@@ -56,34 +79,36 @@
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td><strong>Industrial Fan Alpha</strong></td>
-          <td>SKU-20445-IF</td>
-          <td>Electronics</td>
-          <td>142 units</td>
-          <td><span class="badge in-stock">IN-STOCK</span></td>
-        </tr>
-        <tr>
-          <td><strong>Heavy Duty Cable (50m)</strong></td>
-          <td>SKU-99210-CB</td>
-          <td>Electrical</td>
-          <td>12 units</td>
-          <td><span class="badge low-stock">LOW STOCK</span></td>
-        </tr>
-        <tr>
-          <td><strong>Steel Wrench Set</strong></td>
-          <td>SKU-31120-TW</td>
-          <td>Tools</td>
-          <td>58 units</td>
-          <td><span class="badge in-stock">IN-STOCK</span></td>
-        </tr>
-        <tr>
-          <td><strong>Pallet Wrap Stretch Film</strong></td>
-          <td>SKU-88211-SF</td>
-          <td>Packaging</td>
-          <td>0 units</td>
-          <td><span class="badge out-stock">OUT OF STOCK</span></td>
-        </tr>
+        {#if isLoading}
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 2rem; color: #64748b;">
+              Loading inventory database...
+            </td>
+          </tr>
+        {:else if errorMsg}
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 2rem; color: #ef4444;">
+              {errorMsg}
+            </td>
+          </tr>
+        {:else if inventoryItems.length === 0}
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 2rem; color: #64748b;">
+              No items found in the master list.
+            </td>
+          </tr>
+        {:else}
+          <!-- Loop through the SQL data -->
+          {#each inventoryItems as item}
+            <tr>
+              <td><strong>{item.name}</strong></td>
+              <td>{item.sku}</td>
+              <td>{item.category}</td>
+              <td>--</td> <!-- Quantity will be linked later via InventoryBalances -->
+              <td><span class="badge in-stock">ACTIVE</span></td>
+            </tr>
+          {/each}
+        {/if}
       </tbody>
     </table>
   </div>
