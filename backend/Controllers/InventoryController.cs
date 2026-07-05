@@ -86,13 +86,142 @@ public class InventoryController : ControllerBase
             NewTotalBalance = balance.Quantity
         });
     }
+
+    [HttpPost("pick")]
+    public IActionResult PickStock([FromBody] PickStockRequest request)
+    {
+        if (request.Quantity <= 0)
+        {
+            return BadRequest(new { Message = "Quantity must be greater than zero." });
+        }
+
+        // Check if the inventory balance record exists for this item in this specific bin
+        var balance = _context.InventoryBalances
+            .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
+
+        if (balance == null || balance.Quantity < request.Quantity)
+        {
+            return BadRequest(new { Message = "Insufficient stock available in the specified bin to fulfill this pick." });
+        }
+
+        // Deduct the inventory
+        balance.Quantity -= request.Quantity;
+
+        // If the bin hits exactly 0, we can choose to remove the row or leave it at 0. Let's keep it to preserve tracking history.
+        
+        // Log the movement as a "PICK"
+        var movement = new StockMovement
+        {
+            ItemId = request.ItemId,
+            WarehouseBinId = request.WarehouseBinId,
+            TransactionType = "PICK",
+            QuantityChanged = -request.Quantity, // Negative value signifies stock reduction
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = request.PerformedBy
+        };
+        _context.StockMovements.Add(movement);
+
+        _context.SaveChanges();
+
+        return Ok(new { 
+            Message = $"Successfully picked {request.Quantity} units from Bin {request.WarehouseBinId}.",
+            RemainingBalance = balance.Quantity
+        });
+    }
+
+    [HttpPost("relocate")]
+    public IActionResult RelocateStock([FromBody] RelocateStockRequest request)
+    {
+        if (request.Quantity <= 0)
+        {
+            return BadRequest(new { Message = "Quantity must be greater than zero." });
+        }
+
+        if (request.SourceBinId == request.DestinationBinId)
+        {
+            return BadRequest(new { Message = "Source and destination bins cannot be the same." });
+        }
+
+        // Verify source bin has enough stock
+        var sourceBalance = _context.InventoryBalances
+            .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.SourceBinId);
+
+        if (sourceBalance == null || sourceBalance.Quantity < request.Quantity)
+        {
+            return BadRequest(new { Message = "Insufficient stock in source bin for relocation." });
+        }
+
+        // Verify destination bin exists
+        var destinationBinExists = _context.WarehouseBins.Any(b => b.Id == request.DestinationBinId);
+        if (!destinationBinExists)
+        {
+            return NotFound(new { Message = $"Destination Bin with ID {request.DestinationBinId} does not exist." });
+        }
+
+        // Deduct from source bin
+        sourceBalance.Quantity -= request.Quantity;
+
+        // Add to destination bin
+        var destBalance = _context.InventoryBalances
+            .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.DestinationBinId);
+
+        if (destBalance != null)
+        {
+            destBalance.Quantity += request.Quantity;
+        }
+        else
+        {
+            destBalance = new InventoryBalance
+            {
+                ItemId = request.ItemId,
+                WarehouseBinId = request.DestinationBinId,
+                Quantity = request.Quantity
+            };
+            _context.InventoryBalances.Add(destBalance);
+        }
+
+        // Log the movement as a "RELOCATE"
+        var movement = new StockMovement
+        {
+            ItemId = request.ItemId,
+            WarehouseBinId = request.SourceBinId, // Log where it started
+            TransactionType = "RELOCATE",
+            QuantityChanged = request.Quantity,
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = request.PerformedBy
+        };
+        _context.StockMovements.Add(movement);
+
+        _context.SaveChanges();
+
+        return Ok(new { 
+            Message = $"Successfully relocated {request.Quantity} units from Bin {request.SourceBinId} to Bin {request.DestinationBinId}." 
+        });
+    }
 }
 
-// Add this at the bottom of the file
+// Add these request DTO classes at the very bottom of the file
 public class ReceiveStockRequest
 {
     public int ItemId { get; set; }
     public int WarehouseBinId { get; set; }
+    public int Quantity { get; set; }
+    public string PerformedBy { get; set; } = string.Empty;
+}
+
+public class PickStockRequest
+{
+    public int ItemId { get; set; }
+    public int WarehouseBinId { get; set; }
+    public int Quantity { get; set; }
+    public string PerformedBy { get; set; } = string.Empty;
+}
+
+public class RelocateStockRequest
+{
+    public int ItemId { get; set; }
+    public int SourceBinId { get; set; }
+    public int DestinationBinId { get; set; }
     public int Quantity { get; set; }
     public string PerformedBy { get; set; } = string.Empty;
 }
