@@ -1,6 +1,7 @@
 <script lang="ts">
   import Sidebar from '$lib/components/shared/Sidebar.svelte';
   import Header from '$lib/components/shared/Header.svelte';
+  import ReceiveStockForm from '$lib/components/employee/ReceiveStockForm.svelte';
   import { onMount } from 'svelte';
 
   // State variables for our data
@@ -63,6 +64,8 @@
       <div class="progress-bar"><div class="fill" style="width: 98.4%"></div></div>
     </div>
   </div>
+
+  <ReceiveStockForm />
 
   <div class="panel">
     <div class="panel-header">
