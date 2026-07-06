@@ -95,7 +95,7 @@ Press Start (F5) to build and run the API.
 <div>
   <table>
     <tr>
-      <td><img src="img/signin.png" alt="Login"><br><b>Login</b></td>
+      <td><img src="img/login.png" alt="Login"><br><b>Login</b></td>
       <td><img src="img/admin_dashboard.png" alt="Admin_dashboard"><br><b>Admin Dashboard</b></td>
     </tr>
   </table>
