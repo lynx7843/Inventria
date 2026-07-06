@@ -2,12 +2,17 @@
   import Sidebar from '$lib/components/shared/Sidebar.svelte';
   import Header from '$lib/components/shared/Header.svelte';
   import ReceiveStockForm from '$lib/components/employee/ReceiveStockForm.svelte';
+  import PickStockForm from '$lib/components/employee/PickStockForm.svelte';
+  import RelocateStockForm from '$lib/components/employee/RelocateStockForm.svelte';
   import { onMount } from 'svelte';
 
   // State variables for our data
   let inventoryItems = $state([]);
   let isLoading = $state(true);
   let errorMsg = $state('');
+  
+  // Track which transaction form is visible
+  let activeTab = $state('receive'); 
 
   // Fetch data as soon as the page loads
   onMount(async () => {
@@ -65,7 +70,36 @@
     </div>
   </div>
 
-  <ReceiveStockForm />
+  <!-- TRANSACTION CONTROLS -->
+  <div class="transaction-controls">
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'receive'}
+      on:click={() => activeTab = 'receive'}>
+      ↓ Receive Stock
+    </button>
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'pick'}
+      on:click={() => activeTab = 'pick'}>
+      ↑ Pick Order
+    </button>
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'relocate'}
+      on:click={() => activeTab = 'relocate'}>
+      ⇄ Relocate
+    </button>
+  </div>
+
+  <!-- CONDITIONALLY RENDER THE ACTIVE FORM -->
+  {#if activeTab === 'receive'}
+    <ReceiveStockForm />
+  {:else if activeTab === 'pick'}
+    <PickStockForm />
+  {:else if activeTab === 'relocate'}
+    <RelocateStockForm />
+  {/if}
 
   <div class="panel">
     <div class="panel-header">
@@ -138,6 +172,11 @@
   .text-white { color: white !important; }
   .progress-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; margin-top: 1rem; }
   .progress-bar .fill { height: 100%; background: white; }
+
+  .transaction-controls { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }
+  .tab-btn { background: none; border: none; padding: 0.5rem 1rem; font-weight: 600; color: #64748b; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
+  .tab-btn:hover { background: #f1f5f9; color: #0f172a; }
+  .tab-btn.active { background: #dcfce7; color: #0b6b36; }
 
   .panel { background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; }
   .panel-header h3 { margin: 0 0 1.5rem 0; font-size: 1.1rem; color: #0f172a; }
