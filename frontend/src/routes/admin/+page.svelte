@@ -1,6 +1,37 @@
 <script lang="ts">
   import Sidebar from '$lib/components/shared/Sidebar.svelte';
   import Header from '$lib/components/shared/Header.svelte';
+  import { onMount } from 'svelte';
+
+  let stats = $state({
+    totalUsers: 0,
+    totalStockQuantity: 0,
+    monthlyThroughput: 0,
+    distribution: [],
+    totalUniqueItems: 0,
+    recentActivity: []
+  });
+  
+  let isLoading = $state(true);
+  let errorMsg = $state('');
+
+  onMount(async () => {
+    try {
+      const response = await fetch('http://localhost:5240/api/dashboard/admin');
+      if (!response.ok) throw new Error('Failed to load dashboard data.');
+      stats = await response.json();
+    } catch (err) {
+      errorMsg = err instanceof Error ? err.message : 'Unknown error occurred.';
+    } finally {
+      isLoading = false;
+    }
+  });
+
+  // Helper function to format dates elegantly
+  function formatTimeAgo(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
 </script>
 
 <Sidebar activePage="Dashboard" />
@@ -9,44 +40,65 @@
 <main class="dashboard-content">
   <div class="stats-grid">
     <div class="stat-card">
-      <h4>WAREHOUSE CAPACITY</h4>
-      <div class="value">84.2%</div>
-      <div class="progress-bar"><div class="fill" style="width: 84.2%"></div></div>
-      <p class="subtext">1,240 / 1,500 units used</p>
+      <h4>TOTAL STOCK (UNITS)</h4>
+      <div class="value">{stats.totalStockQuantity.toLocaleString()}</div>
+      <div class="progress-bar"><div class="fill" style="width: 100%"></div></div>
+      <p class="subtext">Currently stored in warehouse</p>
     </div>
     <div class="stat-card">
       <h4>TOTAL USERS</h4>
-      <div class="value">42 <span class="trend pos">+3 this week</span></div>
+      <div class="value">{stats.totalUsers}</div>
     </div>
     <div class="stat-card">
       <h4>MONTHLY THROUGHPUT</h4>
-      <div class="value">8.4k <span class="trend pos">12% growth</span></div>
+      <div class="value">{stats.monthlyThroughput.toLocaleString()}</div>
     </div>
     <div class="stat-card system-health">
       <h4>SYSTEM HEALTH</h4>
-      <div class="value text-white">Stable</div>
-      <p class="text-white">All nodes operational</p>
+      <div class="value text-white">{errorMsg ? 'Error' : 'Stable'}</div>
+      <p class="text-white">{errorMsg ? errorMsg : 'All nodes operational'}</p>
     </div>
   </div>
 
   <div class="middle-grid">
     <div class="panel">
-      <h3>Inventory Reports</h3>
+      <h3>Inventory Categories</h3>
       <div class="chart-placeholder">
-        <div class="donut">1.2k<br/>Total Items</div>
+        <div class="donut">{stats.totalUniqueItems}<br/>SKUs</div>
         <div class="legend">
-          <p>🟢 Electronics <strong>45%</strong></p>
-          <p>🍏 Hardware <strong>30%</strong></p>
-          <p>⚪ Logistics <strong>25%</strong></p>
+          {#if stats.distribution.length === 0}
+            <p>No categories found.</p>
+          {/if}
+          {#each stats.distribution as item}
+            <p>
+              {item.category} 
+              <strong>{Math.round((item.count / stats.totalUniqueItems) * 100)}%</strong>
+            </p>
+          {/each}
         </div>
       </div>
     </div>
+    
     <div class="panel">
       <h3>System Activity</h3>
       <ul class="activity-list">
-        <li><strong>A. Smith</strong> added 45 units of SKU-8902<br/><span>2 mins ago • Warehouse A</span></li>
-        <li><strong>System</strong> automatically backed up database<br/><span>45 mins ago • Global</span></li>
-        <li><strong class="text-red">K. Jones</strong> flagged low stock: Item B-12<br/><span>1 hour ago • Warehouse B</span></li>
+        {#if stats.recentActivity.length === 0}
+          <li>No recent activity to display.</li>
+        {/if}
+        {#each stats.recentActivity as log}
+          <li>
+            <strong>{log.performedBy}</strong> 
+            {#if log.transactionType === 'RECEIVE'}
+               received {log.quantityChanged} units of {log.itemName}
+            {:else if log.transactionType === 'PICK'}
+               picked {Math.abs(log.quantityChanged)} units of {log.itemName}
+            {:else}
+               relocated {log.quantityChanged} units of {log.itemName}
+            {/if}
+            <br/>
+            <span>{formatTimeAgo(log.timestamp)} • Bin {log.warehouseBinId}</span>
+          </li>
+        {/each}
       </ul>
       <button class="btn-outline">View All Logs</button>
     </div>
