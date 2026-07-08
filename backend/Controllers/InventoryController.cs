@@ -22,6 +22,53 @@ public class InventoryController : ControllerBase
         return Ok(items);
     }
 
+    // --- MASTER ITEM CRUD OPERATIONS ---
+
+    [HttpPost("items")]
+    public IActionResult CreateItem([FromBody] ItemRequest request)
+    {
+        var newItem = new Item
+        {
+            Sku = request.Sku,
+            Name = request.Name,
+            Category = request.Category
+        };
+
+        _context.Items.Add(newItem);
+        _context.SaveChanges();
+
+        return Ok(new { Message = "Item created successfully.", Item = newItem });
+    }
+
+    [HttpPut("items/{id}")]
+    public IActionResult UpdateItem(int id, [FromBody] ItemRequest request)
+    {
+        var item = _context.Items.Find(id);
+        if (item == null) return NotFound(new { Message = "Item not found." });
+
+        item.Sku = request.Sku;
+        item.Name = request.Name;
+        item.Category = request.Category;
+
+        _context.SaveChanges();
+
+        return Ok(new { Message = "Item updated successfully." });
+    }
+
+    [HttpDelete("items/{id}")]
+    public IActionResult DeleteItem(int id)
+    {
+        var item = _context.Items.Find(id);
+        if (item == null) return NotFound(new { Message = "Item not found." });
+
+        // Note: In a production system, you might want to prevent deletion if the item 
+        // has existing InventoryBalances, or use a "IsActive" flag instead of hard deletion.
+        _context.Items.Remove(item);
+        _context.SaveChanges();
+
+        return Ok(new { Message = "Item deleted successfully." });
+    }
+
     [HttpPost("receive")]
     public IActionResult ReceiveStock([FromBody] ReceiveStockRequest request)
     {
@@ -201,6 +248,13 @@ public class InventoryController : ControllerBase
 }
 
 // Add these request DTO classes at the very bottom of the file
+public class ItemRequest
+{
+    public string Sku { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+}
+
 public class ReceiveStockRequest
 {
     public int ItemId { get; set; }
