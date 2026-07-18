@@ -1,5 +1,8 @@
 using Inventria.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,7 +12,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowSvelteFrontend",
         policy =>
         {
-            policy.WithOrigins("http://localhost:5173") // Your SvelteKit URL
+            policy.WithOrigins("http://localhost:5173")
                   .AllowAnyHeader()
                   .AllowAnyMethod();
         });
@@ -20,23 +23,38 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<InventriaDbContext>(options =>
     options.UseSqlServer(connectionString));
 
-// 3. Add Controller support
+// 3. Configure JWT Authentication
+var jwtKey = builder.Configuration["Jwt:Key"];
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!))
+        };
+    });
+
+builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline for development
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
 app.UseHttpsRedirection();
-
-// 4. Apply CORS policy (Must be before MapControllers)
 app.UseCors("AllowSvelteFrontend");
 
-// 5. Map the API controllers (like AuthController)
+// 4. Enable Authentication & Authorization (Must be in this exact order)
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapControllers();
 
 app.Run();
