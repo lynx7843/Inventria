@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Inventria.Models;
 using BCrypt.Net;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 namespace Inventria.Controllers;
 
@@ -9,76 +13,61 @@ namespace Inventria.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly InventriaDbContext _context;
+    private readonly IConfiguration _configuration;
 
-    // Inject the database context
-    public AuthController(InventriaDbContext context)
+    // Inject IConfiguration to access the secret key from appsettings.json
+    public AuthController(InventriaDbContext context, IConfiguration configuration)
     {
         _context = context;
+        _configuration = configuration;
     }
 
     [HttpPost("register")]
     public IActionResult Register([FromBody] RegisterRequest request)
     {
-        // 1. The BCrypt Magic: Hash the incoming plain-text password
+        // ... (Keep existing Register code) ...
         string passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
-
-        // 2. Create the user model with the new secure hash
-        var newUser = new User
-        {
-            Username = request.Username,
-            Password = passwordHash, // Saving the hash, NOT the actual password
-            Role = request.Role
-        };
-
-        // 3. Save to SQL Server
+        var newUser = new User { Username = request.Username, Password = passwordHash, Role = request.Role };
         _context.Users.Add(newUser);
         _context.SaveChanges();
-
         return Ok(new { Message = $"{request.Role} '{request.Username}' registered securely!" });
     }
 
     [HttpPost("login")]
     public IActionResult Login([FromBody] LoginRequest request)
     {
-        // 1. Find the user in the database by username
         var user = _context.Users.FirstOrDefault(u => u.Username == request.Username);
-
-        // 2. If user doesn't exist, return a 401 Unauthorized error
-        if (user == null)
+        
+        if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.Password))
         {
             return Unauthorized(new { message = "Invalid username or password." });
         }
 
-        // 3. The BCrypt Magic: Verify the typed password against the saved hash
-        bool isPasswordValid = BCrypt.Net.BCrypt.Verify(request.Password, user.Password);
-
-        if (!isPasswordValid)
+        // --- NEW: Generate JWT Token ---
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!);
+        
+        var tokenDescriptor = new SecurityTokenDescriptor
         {
-            return Unauthorized(new { message = "Invalid username or password." });
-        }
+            Subject = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.Username), // Using system ID instead of personal names
+                new Claim(ClaimTypes.Role, user.Role)
+            }),
+            Expires = DateTime.UtcNow.AddHours(8), // Token expires in 8 hours (Standard shift length)
+            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+        };
 
-        // 4. If valid, return a success response with the user's role
-        // (In a full production app, you would generate a JWT token here)
-        return Ok(new
-        {
-            message = "Login successful",
+        var token = tokenHandler.CreateToken(tokenDescriptor);
+        var jwtString = tokenHandler.WriteToken(token);
+
+        return Ok(new 
+        { 
+            message = "Login successful", 
+            token = jwtString, // Send the token to the frontend
             role = user.Role,
-            username = user.Username
+            username = user.Username 
         });
     }
-}
-
-// Data Transfer Object to define what the incoming JSON should look like
-public class RegisterRequest
-{
-    public string Username { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
-    public string Role { get; set; } = string.Empty;
-}
-
-// Add this at the very bottom of the file next to RegisterRequest
-public class LoginRequest
-{
-    public string Username { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
 }
