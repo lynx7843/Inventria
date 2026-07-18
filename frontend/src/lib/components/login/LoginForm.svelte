@@ -29,7 +29,11 @@
       // If successful, parse the response data
       const data = await response.json();
       
-      // Route the user based on the secure role returned from SQL Server
+      // NEW: Save the token and username to localStorage
+      localStorage.setItem('inventria_token', data.token);
+      localStorage.setItem('inventria_user', data.username);
+      
+      // Route the user based on the secure role
       if (data.role === 'Admin') {
         goto('/admin');
       } else if (data.role === 'Employee') {
