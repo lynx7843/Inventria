@@ -21,8 +21,18 @@
   async function loadItems() {
     isLoading = true;
     try {
-      const res = await fetch('http://localhost:5240/api/inventory');
+      const token = localStorage.getItem('inventria_token');
+      
+      const res = await fetch('http://localhost:5240/api/inventory', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       if (res.ok) items = await res.json();
+      else if (res.status === 401) {
+        window.location.href = '/';
+      }
     } catch (err) {
       console.error(err);
     } finally {
