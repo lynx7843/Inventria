@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Inventria.Models;
 
 namespace Inventria.Controllers;
 
+[Authorize]
 [Route("api/[controller]")]
 [ApiController]
 public class InventoryController : ControllerBase
