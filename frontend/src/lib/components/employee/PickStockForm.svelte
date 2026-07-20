@@ -16,14 +16,20 @@
     isError = false;
 
     try {
+      const token = localStorage.getItem('inventria_token');
+      const currentUser = localStorage.getItem('inventria_user') || 'Unknown';
+
       const response = await fetch('http://localhost:5240/api/inventory/pick', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           itemId: parseInt(itemId),
           warehouseBinId: parseInt(warehouseBinId),
           quantity: parseInt(quantity),
-          performedBy: "Alice Smith" 
+          performedBy: currentUser
         })
       });
 
