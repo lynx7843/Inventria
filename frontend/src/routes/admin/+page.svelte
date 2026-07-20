@@ -17,8 +17,22 @@
 
   onMount(async () => {
     try {
-      const response = await fetch('http://localhost:5240/api/dashboard/admin');
+      const token = localStorage.getItem('inventria_token');
+      
+      const response = await fetch('http://localhost:5240/api/dashboard/admin', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.status === 401) {
+        // Token is missing or expired, kick them back to login
+        window.location.href = '/';
+        return;
+      }
+      
       if (!response.ok) throw new Error('Failed to load dashboard data.');
+      
       stats = await response.json();
     } catch (err) {
       errorMsg = err instanceof Error ? err.message : 'Unknown error occurred.';
