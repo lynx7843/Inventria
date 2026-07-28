@@ -22,16 +22,11 @@ public class AuthController : ControllerBase
         _configuration = configuration;
     }
 
-    [HttpPost("register")]
-    public IActionResult Register([FromBody] RegisterRequest request)
-    {
-        // ... (Keep existing Register code) ...
-        string passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
-        var newUser = new User { Username = request.Username, Password = passwordHash, Role = request.Role };
-        _context.Users.Add(newUser);
-        _context.SaveChanges();
-        return Ok(new { Message = $"{request.Role} '{request.Username}' registered securely!" });
-    }
+    // NOTE: Account creation lives solely at POST /api/users
+    // (UsersController.CreateUser, [Authorize(Roles = "Admin")]).
+    // A public register endpoint let any caller pick their own Role and mint
+    // themselves an Admin account, bypassing every role check in the API.
+    // The first Admin is seeded from configuration at startup - see Program.cs.
 
     [HttpPost("login")]
     public IActionResult Login([FromBody] LoginRequest request)
@@ -70,13 +65,6 @@ public class AuthController : ControllerBase
             username = user.Username 
         });
     }
-}
-
-public class RegisterRequest
-{
-    public string Username { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
-    public string Role { get; set; } = "Employee";
 }
 
 public class LoginRequest
