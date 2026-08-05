@@ -4,6 +4,7 @@
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/api';
 
   let users = $state([]);
   let isLoading = $state(true);
@@ -22,7 +23,7 @@
     isLoading = true;
     errorMsg = '';
     try {
-      const res = await fetch('http://localhost:5240/api/users');
+      const res = await apiFetch('/api/users');
       if (res.ok) {
         users = await res.json();
       } else {
@@ -44,14 +45,14 @@
     if (!username) { errorMsg = 'Username is required.'; return; }
     if (!isEditing && !password) { errorMsg = 'Password is required for new users.'; return; }
 
-    const url = isEditing 
-      ? `http://localhost:5240/api/users/${editingId}`
-      : `http://localhost:5240/api/users`;
-    
+    const path = isEditing
+      ? `/api/users/${editingId}`
+      : '/api/users';
+
     const method = isEditing ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(path, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, role })
@@ -73,7 +74,7 @@
     if (!confirm('WARNING: Are you sure you want to permanently delete this user?')) return;
     
     try {
-      const res = await fetch(`http://localhost:5240/api/users/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
       if (res.ok) await loadUsers();
     } catch (err) {
       console.error("Failed to delete user", err);

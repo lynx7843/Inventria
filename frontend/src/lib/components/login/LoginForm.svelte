@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
+  import { apiFetch } from '$lib/api';
 
   // Svelte 5 state variables
   let username = $state('');
@@ -15,7 +16,7 @@
 
     try {
       // Send the real request to your ASP.NET Core 9 backend
-      const response = await fetch('http://localhost:5240/api/auth/login', {
+      const response = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -29,8 +30,9 @@
       // If successful, parse the response data
       const data = await response.json();
       
-      // NEW: Save the token and username to localStorage
-      localStorage.setItem('inventria_token', data.token);
+      // The session token is not here to be saved - it arrived as an HttpOnly
+      // cookie the browser attaches on its own. Only the display name is kept,
+      // and it is not a credential.
       localStorage.setItem('inventria_user', data.username);
       
       // Route the user based on the secure role

@@ -1,3 +1,4 @@
+using Inventria;
 using Inventria.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -9,14 +10,28 @@ using System.Text;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Add CORS policy
+// Origins come from configuration so a deployment can point at its real
+// frontend host without a code change - override with Cors:AllowedOrigins, e.g.
+// Cors__AllowedOrigins__0=https://inventria.example.com
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+if (allowedOrigins is null || allowedOrigins.Length == 0)
+{
+    // Fall back to the `npm run dev` origin rather than starting with a policy
+    // that rejects every browser request.
+    allowedOrigins = ["http://localhost:5173"];
+}
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSvelteFrontend",
         policy =>
         {
-            policy.WithOrigins("http://localhost:5173")
+            policy.WithOrigins(allowedOrigins)
                   .AllowAnyHeader()
-                  .AllowAnyMethod();
+                  .AllowAnyMethod()
+                  // The session cookie is HttpOnly, so the browser only attaches
+                  // it to cross-origin calls when credentials are allowed here.
+                  .AllowCredentials();
         });
 });
 
@@ -26,7 +41,20 @@ builder.Services.AddDbContext<InventriaDbContext>(options =>
     options.UseSqlServer(connectionString));
 
 // 3. Configure JWT Authentication
+// The signing key is a secret and is never committed: supply it through
+// user-secrets locally, or the Jwt__Key environment variable in deployment.
+// Refuse to start without a usable one rather than fall back to a shared
+// default that would let anyone holding it mint Admin tokens.
 var jwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrWhiteSpace(jwtKey) || Encoding.UTF8.GetByteCount(jwtKey) < 32)
+{
+    throw new InvalidOperationException(
+        "Jwt:Key is missing or shorter than the 32 bytes HMAC-SHA256 requires. " +
+        "Set it out of source control, e.g.\n" +
+        "  dotnet user-secrets set \"Jwt:Key\" \"$(openssl rand -base64 48)\"\n" +
+        "or export Jwt__Key=... before starting the app.");
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -36,12 +64,34 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = false,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            // Browsers hold the token in an HttpOnly cookie and cannot set an
+            // Authorization header from it, so read it off the request instead.
+            // Any header already present still wins, which keeps non-browser
+            // clients (inventria.http, curl) working unchanged.
+            OnMessageReceived = context =>
+            {
+                if (string.IsNullOrEmpty(context.Token) &&
+                    context.Request.Cookies.TryGetValue(AuthCookie.Name, out var cookieToken))
+                {
+                    context.Token = cookieToken;
+                }
+
+                return Task.CompletedTask;
+            }
         };
     });
 
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
+
+// Backs the app.MapOpenApi() endpoint below; without it the document service
+// is never registered and the mapped route cannot resolve one.
+builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
