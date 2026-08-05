@@ -4,6 +4,7 @@
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/api';
 
   let items = $state([]);
   let isLoading = $state(true);
@@ -21,13 +22,7 @@
   async function loadItems() {
     isLoading = true;
     try {
-      const token = localStorage.getItem('inventria_token');
-      
-      const res = await fetch('http://localhost:5240/api/inventory', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const res = await apiFetch('/api/inventory');
       
       if (res.ok) items = await res.json();
       else if (res.status === 401) {
@@ -44,14 +39,14 @@
 
   // 2. Save Item (Create or Update)
   async function saveItem() {
-    const url = isEditing 
-      ? `http://localhost:5240/api/inventory/items/${editingId}`
-      : `http://localhost:5240/api/inventory/items`;
-    
+    const path = isEditing
+      ? `/api/inventory/items/${editingId}`
+      : '/api/inventory/items';
+
     const method = isEditing ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(path, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sku, name, category })
@@ -71,7 +66,7 @@
     if (!confirm('Are you sure you want to delete this item?')) return;
     
     try {
-      const res = await fetch(`http://localhost:5240/api/inventory/items/${id}`, {
+      const res = await apiFetch(`/api/inventory/items/${id}`, {
         method: 'DELETE'
       });
       if (res.ok) await loadItems();

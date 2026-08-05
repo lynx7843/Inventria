@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Inventria.Models;
 using BCrypt.Net;
@@ -38,10 +39,11 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "Invalid username or password." });
         }
 
-        // --- NEW: Generate JWT Token ---
+        // --- Generate JWT Token ---
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!);
-        
+        var expires = DateTime.UtcNow.AddHours(8); // Standard shift length
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(new[]
@@ -50,20 +52,36 @@ public class AuthController : ControllerBase
                 new Claim(ClaimTypes.Name, user.Username), // Using system ID instead of personal names
                 new Claim(ClaimTypes.Role, user.Role)
             }),
-            Expires = DateTime.UtcNow.AddHours(8), // Token expires in 8 hours (Standard shift length)
+            Expires = expires,
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
         };
 
         var token = tokenHandler.CreateToken(tokenDescriptor);
         var jwtString = tokenHandler.WriteToken(token);
 
-        return Ok(new 
-        { 
-            message = "Login successful", 
-            token = jwtString, // Send the token to the frontend
+        // The token goes back as an HttpOnly cookie and is deliberately kept out
+        // of the response body: script on the page - including injected script -
+        // must never be able to read it. Role and username are returned because
+        // the UI routes on them, and neither is a credential.
+        Response.Cookies.Append(AuthCookie.Name, jwtString, AuthCookie.Build(_configuration, expires));
+
+        return Ok(new
+        {
+            message = "Login successful",
             role = user.Role,
-            username = user.Username 
+            username = user.Username
         });
+    }
+
+    // Clearing an HttpOnly cookie has to happen server-side - the browser cannot
+    // delete it from script. Anonymous so an already-expired session can still
+    // clean up after itself.
+    [AllowAnonymous]
+    [HttpPost("logout")]
+    public IActionResult Logout()
+    {
+        Response.Cookies.Delete(AuthCookie.Name, AuthCookie.Build(_configuration));
+        return Ok(new { message = "Logged out" });
     }
 }
 

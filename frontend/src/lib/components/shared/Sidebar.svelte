@@ -1,7 +1,24 @@
 <script lang="ts">
-  let { 
-    activePage = "Dashboard" 
+  import { goto } from '$app/navigation';
+  import { apiFetch } from '$lib/api';
+
+  let {
+    activePage = "Dashboard"
   } = $props();
+
+  // The session cookie is HttpOnly, so only the server can clear it - navigating
+  // away would otherwise leave a valid session behind for the rest of its life.
+  async function handleLogout() {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      // A failed call still shouldn't strand the user on a signed-in screen.
+      console.error('Logout request failed', err);
+    } finally {
+      localStorage.removeItem('inventria_user');
+      goto('/');
+    }
+  }
 </script>
 
 <aside class="sidebar">
@@ -25,10 +42,10 @@
 
   <div class="sidebar-footer">
     <button class="btn-new">+ New Entry</button>
-    <a href="/" class="logout">
+    <button type="button" class="logout" onclick={handleLogout}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
       Logout
-    </a>
+    </button>
   </div>
 </aside>
 
@@ -44,5 +61,5 @@
   .nav-links a.active { background: #eefdf4; color: #0b6b36; border-left-color: #0b6b36; }
   .sidebar-footer { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; border-top: 1px solid #e2e8f0; }
   .btn-new { background: #0b6b36; color: white; border: none; padding: 0.75rem; border-radius: 6px; font-weight: 600; cursor: pointer; }
-  .logout { display: flex; align-items: center; gap: 0.5rem; color: #475569; text-decoration: none; font-size: 0.9rem; font-weight: 500; }
+  .logout { display: flex; align-items: center; gap: 0.5rem; color: #475569; text-decoration: none; font-size: 0.9rem; font-weight: 500; background: none; border: none; padding: 0; font-family: inherit; cursor: pointer; }
 </style>

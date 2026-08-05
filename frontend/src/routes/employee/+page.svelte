@@ -5,6 +5,7 @@
   import PickStockForm from '$lib/components/employee/PickStockForm.svelte';
   import RelocateStockForm from '$lib/components/employee/RelocateStockForm.svelte';
   import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/api';
 
   // State variables for our data
   let inventoryItems = $state([]);
@@ -17,7 +18,7 @@
   // Fetch data as soon as the page loads
   onMount(async () => {
     try {
-      const response = await fetch('http://localhost:5240/api/inventory');
+      const response = await apiFetch('/api/inventory');
       
       if (!response.ok) {
         throw new Error('Failed to load inventory data.');

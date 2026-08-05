@@ -2,6 +2,7 @@
   import Sidebar from '$lib/components/shared/Sidebar.svelte';
   import Header from '$lib/components/shared/Header.svelte';
   import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/api';
 
   let stats = $state({
     totalUsers: 0,
@@ -17,13 +18,7 @@
 
   onMount(async () => {
     try {
-      const token = localStorage.getItem('inventria_token');
-      
-      const response = await fetch('http://localhost:5240/api/dashboard/admin', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await apiFetch('/api/dashboard/admin');
       
       if (response.status === 401) {
         // Token is missing or expired, kick them back to login

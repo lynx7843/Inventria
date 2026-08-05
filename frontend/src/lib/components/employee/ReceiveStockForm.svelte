@@ -1,6 +1,7 @@
 <script lang="ts">
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
+  import { apiFetch } from '$lib/api';
 
   // State variables for the form inputs
   let itemId = $state('');
@@ -18,14 +19,12 @@
     isError = false;
 
     try {
-      const token = localStorage.getItem('inventria_token');
       const currentUser = localStorage.getItem('inventria_user') || 'Unknown';
 
-      const response = await fetch('http://localhost:5240/api/inventory/receive', {
+      const response = await apiFetch('/api/inventory/receive', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           itemId: parseInt(itemId),
