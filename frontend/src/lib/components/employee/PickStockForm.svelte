@@ -57,7 +57,7 @@
     <p class="subtitle">Deduct items from a specific bin for outbound shipping.</p>
   </div>
 
-  <form onsubmit={handlePickStock} class="form-grid">
+  <form onsubmit={(e) => { e.preventDefault(); handlePickStock(); }} class="form-grid">
     <div class="input-row">
       <InputField id="pick-item-id" label="ITEM ID" placeholder="e.g., 1" bind:value={itemId} required={true} />
       <InputField id="pick-bin-id" label="SOURCE BIN ID" placeholder="e.g., 1" bind:value={warehouseBinId} required={true} />

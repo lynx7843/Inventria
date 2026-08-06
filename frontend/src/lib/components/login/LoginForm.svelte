@@ -53,7 +53,7 @@
   }
 </script>
 
-<form onsubmit={handleLogin}>
+<form onsubmit={(e) => { e.preventDefault(); handleLogin(); }}>
   <InputField 
     id="username" 
     label="USERNAME" 

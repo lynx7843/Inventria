@@ -61,7 +61,7 @@
     <p class="subtitle">Log new stock arrivals into the warehouse.</p>
   </div>
 
-  <form onsubmit={handleReceiveStock} class="form-grid">
+  <form onsubmit={(e) => { e.preventDefault(); handleReceiveStock(); }} class="form-grid">
     <div class="input-row">
       <InputField 
         id="item-id" 
