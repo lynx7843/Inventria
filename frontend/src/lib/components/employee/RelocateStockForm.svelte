@@ -60,7 +60,7 @@
     <p class="subtitle">Move stock from one warehouse bin to another.</p>
   </div>
 
-  <form onsubmit={handleRelocateStock} class="form-grid">
+  <form onsubmit={(e) => { e.preventDefault(); handleRelocateStock(); }} class="form-grid">
     <div class="input-row">
       <InputField id="rel-item-id" label="ITEM ID" placeholder="e.g., 1" bind:value={itemId} required={true} />
       <InputField id="rel-source-bin" label="SOURCE BIN" placeholder="e.g., 1" bind:value={sourceBinId} required={true} />
