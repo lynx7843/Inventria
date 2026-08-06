@@ -105,7 +105,17 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+// Skipped in Development: the `https` profile listens on both :7149 and :5240,
+// so this middleware answers browser calls to the HTTP endpoint with a 307 to a
+// different origin. A cross-origin redirect is fatal to a preflighted,
+// credentialed fetch, and the `http` profile only escapes it because it has no
+// HTTPS port for the middleware to redirect to. Outside Development there is a
+// single public origin and no such cross-origin hop, so keep enforcing HTTPS.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("AllowSvelteFrontend");
 
 // 4. Enable Authentication & Authorization (Must be in this exact order)
