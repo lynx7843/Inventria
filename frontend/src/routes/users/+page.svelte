@@ -26,6 +26,10 @@
       const res = await apiFetch('/api/users');
       if (res.ok) {
         users = await res.json();
+      } else if (res.status === 401) {
+        // Session is missing or expired, kick them back to login
+        window.location.href = '/';
+        return;
       } else {
         throw new Error('Failed to fetch users');
       }

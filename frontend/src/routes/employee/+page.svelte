@@ -19,7 +19,13 @@
   onMount(async () => {
     try {
       const response = await apiFetch('/api/inventory');
-      
+
+      if (response.status === 401) {
+        // Session is missing or expired, kick them back to login
+        window.location.href = '/';
+        return;
+      }
+
       if (!response.ok) {
         throw new Error('Failed to load inventory data.');
       }
