@@ -6,6 +6,11 @@
   import RelocateStockForm from '$lib/components/employee/RelocateStockForm.svelte';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { requireSession } from '$lib/auth';
+
+  // Gates the markup below. No role list: the stock movements on this page are
+  // open to Admins as well, so this only requires that someone is signed in.
+  let allowed = $state(false);
 
   // State variables for our data
   let inventoryItems = $state([]);
@@ -17,6 +22,9 @@
 
   // Fetch data as soon as the page loads
   onMount(async () => {
+    if (!requireSession()) return;
+    allowed = true;
+
     try {
       const response = await apiFetch('/api/inventory');
 
@@ -39,6 +47,7 @@
   });
 </script>
 
+{#if allowed}
 <Sidebar activePage="Dashboard" />
 <Header userName="Alice Smith" role="Inventory Manager" />
 
@@ -157,6 +166,7 @@
     </table>
   </div>
 </main>
+{/if}
 
 <style>
   .dashboard-content { margin-left: 250px; padding: 2rem; background: #f8fafc; min-height: calc(100vh - 70px); }

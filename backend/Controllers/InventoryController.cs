@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Inventria.Models;
+using System.Security.Claims;
 
 namespace Inventria.Controllers;
 
@@ -15,6 +16,12 @@ public class InventoryController : ControllerBase
     {
         _context = context;
     }
+
+    // The only trustworthy answer to "who did this" is the signed token. Taking
+    // it from the request body let any authenticated caller stamp a colleague's
+    // name on a movement, which is the one field the audit log rests on.
+    // [Authorize] guarantees an authenticated principal, so the claim is present.
+    private string CurrentUsername => User.FindFirstValue(ClaimTypes.Name)!;
 
     [HttpGet]
     public IActionResult GetAllItems()
@@ -123,7 +130,7 @@ public class InventoryController : ControllerBase
             TransactionType = "RECEIVE",
             QuantityChanged = request.Quantity,
             Timestamp = DateTime.UtcNow,
-            PerformedBy = request.PerformedBy
+            PerformedBy = CurrentUsername
         };
         _context.StockMovements.Add(movement);
 
@@ -166,7 +173,7 @@ public class InventoryController : ControllerBase
             TransactionType = "PICK",
             QuantityChanged = -request.Quantity, // Negative value signifies stock reduction
             Timestamp = DateTime.UtcNow,
-            PerformedBy = request.PerformedBy
+            PerformedBy = CurrentUsername
         };
         _context.StockMovements.Add(movement);
 
@@ -237,7 +244,7 @@ public class InventoryController : ControllerBase
             TransactionType = "RELOCATE",
             QuantityChanged = request.Quantity,
             Timestamp = DateTime.UtcNow,
-            PerformedBy = request.PerformedBy
+            PerformedBy = CurrentUsername
         };
         _context.StockMovements.Add(movement);
 
@@ -257,12 +264,13 @@ public class ItemRequest
     public string Category { get; set; } = string.Empty;
 }
 
+// None of these carry a PerformedBy: attribution comes from the caller's token,
+// so there is deliberately no field for a client to set it with.
 public class ReceiveStockRequest
 {
     public int ItemId { get; set; }
     public int WarehouseBinId { get; set; }
     public int Quantity { get; set; }
-    public string PerformedBy { get; set; } = string.Empty;
 }
 
 public class PickStockRequest
@@ -270,7 +278,6 @@ public class PickStockRequest
     public int ItemId { get; set; }
     public int WarehouseBinId { get; set; }
     public int Quantity { get; set; }
-    public string PerformedBy { get; set; } = string.Empty;
 }
 
 public class RelocateStockRequest
@@ -279,5 +286,4 @@ public class RelocateStockRequest
     public int SourceBinId { get; set; }
     public int DestinationBinId { get; set; }
     public int Quantity { get; set; }
-    public string PerformedBy { get; set; } = string.Empty;
 }
