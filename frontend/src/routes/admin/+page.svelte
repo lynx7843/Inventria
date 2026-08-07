@@ -3,6 +3,11 @@
   import Header from '$lib/components/shared/Header.svelte';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { requireSession } from '$lib/auth';
+
+  // Gates the markup below: nothing renders until the guard confirms an Admin,
+  // so a redirect never flashes the dashboard on its way out.
+  let allowed = $state(false);
 
   let stats = $state({
     totalUsers: 0,
@@ -17,6 +22,9 @@
   let errorMsg = $state('');
 
   onMount(async () => {
+    if (!requireSession(['Admin'])) return;
+    allowed = true;
+
     try {
       const response = await apiFetch('/api/dashboard/admin');
       
@@ -43,6 +51,7 @@
   }
 </script>
 
+{#if allowed}
 <Sidebar activePage="Dashboard" />
 <Header userName="Admin User" role="SYSTEM ROOT" />
 
@@ -150,6 +159,7 @@
     </table>
   </div>
 </main>
+{/if}
 
 <style>
   .dashboard-content { margin-left: 250px; padding: 2rem; background: #f8fafc; min-height: calc(100vh - 70px); }

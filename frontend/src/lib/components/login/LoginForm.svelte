@@ -3,6 +3,7 @@
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
   import { apiFetch } from '$lib/api';
+  import { saveSession, homeFor } from '$lib/auth';
 
   // Svelte 5 state variables
   let username = $state('');
@@ -31,18 +32,16 @@
       const data = await response.json();
       
       // The session token is not here to be saved - it arrived as an HttpOnly
-      // cookie the browser attaches on its own. Only the display name is kept,
-      // and it is not a credential.
-      localStorage.setItem('inventria_user', data.username);
-      
-      // Route the user based on the secure role
-      if (data.role === 'Admin') {
-        goto('/admin');
-      } else if (data.role === 'Employee') {
-        goto('/employee');
-      } else {
+      // cookie the browser attaches on its own. Only the display name and role
+      // are kept, and neither is a credential: the role is what lets a page tell
+      // an Admin from an Employee, while the API re-checks it on every request.
+      if (data.role !== 'Admin' && data.role !== 'Employee') {
         errorMsg = 'Unrecognized user role.';
+        return;
       }
+
+      saveSession(data.username, data.role);
+      goto(homeFor(data.role));
 
     } catch (err) {
       // Catch network errors (like the backend being turned off) or invalid credentials

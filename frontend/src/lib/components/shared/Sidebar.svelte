@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { apiFetch } from '$lib/api';
+  import { clearSession } from '$lib/auth';
 
   let {
     activePage = "Dashboard"
@@ -15,7 +16,7 @@
       // A failed call still shouldn't strand the user on a signed-in screen.
       console.error('Logout request failed', err);
     } finally {
-      localStorage.removeItem('inventria_user');
+      clearSession();
       goto('/');
     }
   }
