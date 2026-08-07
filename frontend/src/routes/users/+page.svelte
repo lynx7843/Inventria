@@ -5,6 +5,10 @@
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { requireSession } from '$lib/auth';
+
+  // Gates the markup below: nothing renders until the guard confirms an Admin.
+  let allowed = $state(false);
 
   let users = $state([]);
   let isLoading = $state(true);
@@ -40,7 +44,11 @@
     }
   }
 
-  onMount(loadUsers);
+  onMount(() => {
+    if (!requireSession(['Admin'])) return;
+    allowed = true;
+    loadUsers();
+  });
 
   async function saveUser() {
     errorMsg = '';
@@ -110,6 +118,7 @@
   }
 </script>
 
+{#if allowed}
 <Sidebar activePage="Users" />
 <Header userName="Admin User" role="SYSTEM ROOT" />
 
@@ -199,6 +208,7 @@
     </table>
   </div>
 </main>
+{/if}
 
 <style>
   .dashboard-content { margin-left: 250px; padding: 2rem; background: #f8fafc; min-height: calc(100vh - 70px); }

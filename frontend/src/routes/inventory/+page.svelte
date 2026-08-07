@@ -5,6 +5,11 @@
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { requireSession } from '$lib/auth';
+
+  // Gates the markup below. No role list: Admins and Employees both manage
+  // inventory, so this only requires that someone is signed in.
+  let allowed = $state(false);
 
   let items = $state([]);
   let isLoading = $state(true);
@@ -35,7 +40,11 @@
     }
   }
 
-  onMount(loadItems);
+  onMount(() => {
+    if (!requireSession()) return;
+    allowed = true;
+    loadItems();
+  });
 
   // 2. Save Item (Create or Update)
   async function saveItem() {
@@ -99,6 +108,7 @@
   }
 </script>
 
+{#if allowed}
 <Sidebar activePage="Inventory" />
 <Header userName="Admin User" role="SYSTEM ROOT" />
 
@@ -164,6 +174,7 @@
     </table>
   </div>
 </main>
+{/if}
 
 <style>
   .dashboard-content { margin-left: 250px; padding: 2rem; background: #f8fafc; min-height: calc(100vh - 70px); }
