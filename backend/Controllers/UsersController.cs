@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Inventria.Models;
 using BCrypt.Net;
 
@@ -45,7 +46,17 @@ public class UsersController : ControllerBase
         };
 
         _context.Users.Add(newUser);
-        _context.SaveChanges();
+
+        try
+        {
+            _context.SaveChanges();
+        }
+        catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
+        {
+            // Another create claimed this username between the check above and
+            // this insert. Same answer the check would have given.
+            return BadRequest(new { Message = "Username already exists." });
+        }
 
         return Ok(new { Message = "User created successfully." });
     }
@@ -71,7 +82,14 @@ public class UsersController : ControllerBase
             user.Password = BCrypt.Net.BCrypt.HashPassword(request.Password);
         }
 
-        _context.SaveChanges();
+        try
+        {
+            _context.SaveChanges();
+        }
+        catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
+        {
+            return BadRequest(new { Message = "Username already exists." });
+        }
 
         return Ok(new { Message = "User updated successfully." });
     }

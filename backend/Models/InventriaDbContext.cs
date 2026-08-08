@@ -26,5 +26,26 @@ public class InventriaDbContext : DbContext
         modelBuilder.Entity<InventoryBalance>()
             .HasIndex(b => new { b.ItemId, b.WarehouseBinId })
             .IsUnique();
+
+        // Usernames identify an account to log in as, so two of them is an
+        // authentication bug, not just untidy data. The Any() check in
+        // UsersController is a check-then-act that two concurrent creates can both
+        // pass; this index is what actually holds the line.
+        //
+        // The length is here because it has to be: string properties map to
+        // nvarchar(max) by default and SQL Server cannot build an index over that.
+        modelBuilder.Entity<User>(user =>
+        {
+            user.Property(u => u.Username).HasMaxLength(100);
+            user.HasIndex(u => u.Username).IsUnique();
+        });
+
+        // A SKU is the code people scan and search by, so duplicates make the
+        // wrong item pickable. Same nvarchar(max) constraint as above.
+        modelBuilder.Entity<Item>(item =>
+        {
+            item.Property(i => i.Sku).HasMaxLength(64);
+            item.HasIndex(i => i.Sku).IsUnique();
+        });
     }
 }

@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Inventria.Models;
 using System.Security.Claims;
@@ -31,10 +30,6 @@ public class InventoryController : ControllerBase
     // caller should be told to try again rather than kept waiting.
     private const int MaxConcurrencyAttempts = 4;
 
-    // SQL Server's "duplicate key" error numbers - 2627 for a unique constraint,
-    // 2601 for a unique index.
-    private static readonly int[] DuplicateKeyErrors = [2601, 2627];
-
     // Runs a stock move that reads balances and then saves them, retrying from
     // scratch if another request changed the same rows in between.
     //
@@ -57,22 +52,18 @@ public class InventoryController : ControllerBase
                 // longer matches and the UPDATE matched no rows.
                 _context.ChangeTracker.Clear();
             }
-            catch (DbUpdateException ex) when (IsDuplicateBalance(ex))
+            catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
             {
                 // Someone else created the balance row for this item/bin between
-                // our lookup and our insert. The retry will find their row.
+                // our lookup and our insert. A stock move writes no other row that
+                // a unique index covers, so this is always that race and is always
+                // safe to retry - the retry will find their row.
                 _context.ChangeTracker.Clear();
             }
         }
 
         return Conflict(new { Message = "This stock is being updated by another request. Please try again." });
     }
-
-    // The unique index on (ItemId, WarehouseBinId) is the only uniqueness rule any
-    // of these moves can violate, so a duplicate-key failure here is always that
-    // race and is always safe to retry.
-    private static bool IsDuplicateBalance(DbUpdateException ex) =>
-        ex.InnerException is SqlException sql && DuplicateKeyErrors.Contains(sql.Number);
 
     [HttpGet]
     public IActionResult GetAllItems()
@@ -95,7 +86,15 @@ public class InventoryController : ControllerBase
         };
 
         _context.Items.Add(newItem);
-        _context.SaveChanges();
+
+        try
+        {
+            _context.SaveChanges();
+        }
+        catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
+        {
+            return BadRequest(new { Message = $"SKU '{request.Sku}' is already used by another item." });
+        }
 
         return Ok(new { Message = "Item created successfully.", Item = newItem });
     }
@@ -110,7 +109,14 @@ public class InventoryController : ControllerBase
         item.Name = request.Name;
         item.Category = request.Category;
 
-        _context.SaveChanges();
+        try
+        {
+            _context.SaveChanges();
+        }
+        catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
+        {
+            return BadRequest(new { Message = $"SKU '{request.Sku}' is already used by another item." });
+        }
 
         return Ok(new { Message = "Item updated successfully." });
     }
