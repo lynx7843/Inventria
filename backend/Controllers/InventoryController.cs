@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Inventria.Models;
 using System.Security.Claims;
 
@@ -22,6 +24,55 @@ public class InventoryController : ControllerBase
     // name on a movement, which is the one field the audit log rests on.
     // [Authorize] guarantees an authenticated principal, so the claim is present.
     private string CurrentUsername => User.FindFirstValue(ClaimTypes.Name)!;
+
+    // How many times a stock move re-runs after losing a race. Conflicts only
+    // happen when two requests touch the same item/bin at the same moment, so a
+    // handful of attempts is plenty; past that the bin is hot enough that the
+    // caller should be told to try again rather than kept waiting.
+    private const int MaxConcurrencyAttempts = 4;
+
+    // SQL Server's "duplicate key" error numbers - 2627 for a unique constraint,
+    // 2601 for a unique index.
+    private static readonly int[] DuplicateKeyErrors = [2601, 2627];
+
+    // Runs a stock move that reads balances and then saves them, retrying from
+    // scratch if another request changed the same rows in between.
+    //
+    // Each attempt must re-read the balances it depends on, which is why the
+    // change tracker is cleared between attempts: a retry has to see the winner's
+    // new quantity and re-run its own "enough stock?" check against it, and it
+    // has to drop the StockMovement the failed attempt had queued up. A single
+    // SaveChanges is already one transaction, so a failed attempt writes nothing.
+    private IActionResult ExecuteStockMove(Func<IActionResult> move)
+    {
+        for (var attempt = 1; attempt <= MaxConcurrencyAttempts; attempt++)
+        {
+            try
+            {
+                return move();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // A balance row we read has been updated since; its RowVersion no
+                // longer matches and the UPDATE matched no rows.
+                _context.ChangeTracker.Clear();
+            }
+            catch (DbUpdateException ex) when (IsDuplicateBalance(ex))
+            {
+                // Someone else created the balance row for this item/bin between
+                // our lookup and our insert. The retry will find their row.
+                _context.ChangeTracker.Clear();
+            }
+        }
+
+        return Conflict(new { Message = "This stock is being updated by another request. Please try again." });
+    }
+
+    // The unique index on (ItemId, WarehouseBinId) is the only uniqueness rule any
+    // of these moves can violate, so a duplicate-key failure here is always that
+    // race and is always safe to retry.
+    private static bool IsDuplicateBalance(DbUpdateException ex) =>
+        ex.InnerException is SqlException sql && DuplicateKeyErrors.Contains(sql.Number);
 
     [HttpGet]
     public IActionResult GetAllItems()
@@ -101,45 +152,48 @@ public class InventoryController : ControllerBase
             return NotFound(new { Message = $"Warehouse Bin with ID {request.WarehouseBinId} not found." });
         }
 
-        // 4. Update or Create the Inventory Balance
-        var balance = _context.InventoryBalances
-            .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
+        return ExecuteStockMove(() =>
+        {
+            // 4. Update or Create the Inventory Balance
+            var balance = _context.InventoryBalances
+                .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
 
-        if (balance != null)
-        {
-            // If the item is already in this bin, just add to the existing quantity
-            balance.Quantity += request.Quantity;
-        }
-        else
-        {
-            // If this is the first time this item is placed in this bin, create a new record
-            balance = new InventoryBalance
+            if (balance != null)
+            {
+                // If the item is already in this bin, just add to the existing quantity
+                balance.Quantity += request.Quantity;
+            }
+            else
+            {
+                // If this is the first time this item is placed in this bin, create a new record
+                balance = new InventoryBalance
+                {
+                    ItemId = request.ItemId,
+                    WarehouseBinId = request.WarehouseBinId,
+                    Quantity = request.Quantity
+                };
+                _context.InventoryBalances.Add(balance);
+            }
+
+            // 5. Log the Stock Movement for auditing
+            var movement = new StockMovement
             {
                 ItemId = request.ItemId,
                 WarehouseBinId = request.WarehouseBinId,
-                Quantity = request.Quantity
+                TransactionType = "RECEIVE",
+                QuantityChanged = request.Quantity,
+                Timestamp = DateTime.UtcNow,
+                PerformedBy = CurrentUsername
             };
-            _context.InventoryBalances.Add(balance);
-        }
+            _context.StockMovements.Add(movement);
 
-        // 5. Log the Stock Movement for auditing
-        var movement = new StockMovement
-        {
-            ItemId = request.ItemId,
-            WarehouseBinId = request.WarehouseBinId,
-            TransactionType = "RECEIVE",
-            QuantityChanged = request.Quantity,
-            Timestamp = DateTime.UtcNow,
-            PerformedBy = CurrentUsername
-        };
-        _context.StockMovements.Add(movement);
+            // 6. Commit both changes to SQL Server simultaneously
+            _context.SaveChanges();
 
-        // 6. Commit both changes to SQL Server simultaneously
-        _context.SaveChanges();
-
-        return Ok(new {
-            Message = $"Successfully received {request.Quantity} units of {item.Name} into {bin.Zone}-{bin.Aisle}-{bin.Shelf}.",
-            NewTotalBalance = balance.Quantity
+            return Ok(new {
+                Message = $"Successfully received {request.Quantity} units of {item.Name} into {bin.Zone}-{bin.Aisle}-{bin.Shelf}.",
+                NewTotalBalance = balance.Quantity
+            });
         });
     }
 
@@ -151,37 +205,40 @@ public class InventoryController : ControllerBase
             return BadRequest(new { Message = "Quantity must be greater than zero." });
         }
 
-        // Check if the inventory balance record exists for this item in this specific bin
-        var balance = _context.InventoryBalances
-            .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
-
-        if (balance == null || balance.Quantity < request.Quantity)
+        return ExecuteStockMove(() =>
         {
-            return BadRequest(new { Message = "Insufficient stock available in the specified bin to fulfill this pick." });
-        }
+            // Check if the inventory balance record exists for this item in this specific bin
+            var balance = _context.InventoryBalances
+                .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
 
-        // Deduct the inventory
-        balance.Quantity -= request.Quantity;
+            if (balance == null || balance.Quantity < request.Quantity)
+            {
+                return BadRequest(new { Message = "Insufficient stock available in the specified bin to fulfill this pick." });
+            }
 
-        // If the bin hits exactly 0, we can choose to remove the row or leave it at 0. Let's keep it to preserve tracking history.
-        
-        // Log the movement as a "PICK"
-        var movement = new StockMovement
-        {
-            ItemId = request.ItemId,
-            WarehouseBinId = request.WarehouseBinId,
-            TransactionType = "PICK",
-            QuantityChanged = -request.Quantity, // Negative value signifies stock reduction
-            Timestamp = DateTime.UtcNow,
-            PerformedBy = CurrentUsername
-        };
-        _context.StockMovements.Add(movement);
+            // Deduct the inventory
+            balance.Quantity -= request.Quantity;
 
-        _context.SaveChanges();
+            // If the bin hits exactly 0, we can choose to remove the row or leave it at 0. Let's keep it to preserve tracking history.
 
-        return Ok(new { 
-            Message = $"Successfully picked {request.Quantity} units from Bin {request.WarehouseBinId}.",
-            RemainingBalance = balance.Quantity
+            // Log the movement as a "PICK"
+            var movement = new StockMovement
+            {
+                ItemId = request.ItemId,
+                WarehouseBinId = request.WarehouseBinId,
+                TransactionType = "PICK",
+                QuantityChanged = -request.Quantity, // Negative value signifies stock reduction
+                Timestamp = DateTime.UtcNow,
+                PerformedBy = CurrentUsername
+            };
+            _context.StockMovements.Add(movement);
+
+            _context.SaveChanges();
+
+            return Ok(new {
+                Message = $"Successfully picked {request.Quantity} units from Bin {request.WarehouseBinId}.",
+                RemainingBalance = balance.Quantity
+            });
         });
     }
 
@@ -198,60 +255,63 @@ public class InventoryController : ControllerBase
             return BadRequest(new { Message = "Source and destination bins cannot be the same." });
         }
 
-        // Verify source bin has enough stock
-        var sourceBalance = _context.InventoryBalances
-            .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.SourceBinId);
-
-        if (sourceBalance == null || sourceBalance.Quantity < request.Quantity)
+        return ExecuteStockMove(() =>
         {
-            return BadRequest(new { Message = "Insufficient stock in source bin for relocation." });
-        }
+            // Verify source bin has enough stock
+            var sourceBalance = _context.InventoryBalances
+                .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.SourceBinId);
 
-        // Verify destination bin exists
-        var destinationBinExists = _context.WarehouseBins.Any(b => b.Id == request.DestinationBinId);
-        if (!destinationBinExists)
-        {
-            return NotFound(new { Message = $"Destination Bin with ID {request.DestinationBinId} does not exist." });
-        }
+            if (sourceBalance == null || sourceBalance.Quantity < request.Quantity)
+            {
+                return BadRequest(new { Message = "Insufficient stock in source bin for relocation." });
+            }
 
-        // Deduct from source bin
-        sourceBalance.Quantity -= request.Quantity;
+            // Verify destination bin exists
+            var destinationBinExists = _context.WarehouseBins.Any(b => b.Id == request.DestinationBinId);
+            if (!destinationBinExists)
+            {
+                return NotFound(new { Message = $"Destination Bin with ID {request.DestinationBinId} does not exist." });
+            }
 
-        // Add to destination bin
-        var destBalance = _context.InventoryBalances
-            .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.DestinationBinId);
+            // Deduct from source bin
+            sourceBalance.Quantity -= request.Quantity;
 
-        if (destBalance != null)
-        {
-            destBalance.Quantity += request.Quantity;
-        }
-        else
-        {
-            destBalance = new InventoryBalance
+            // Add to destination bin
+            var destBalance = _context.InventoryBalances
+                .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.DestinationBinId);
+
+            if (destBalance != null)
+            {
+                destBalance.Quantity += request.Quantity;
+            }
+            else
+            {
+                destBalance = new InventoryBalance
+                {
+                    ItemId = request.ItemId,
+                    WarehouseBinId = request.DestinationBinId,
+                    Quantity = request.Quantity
+                };
+                _context.InventoryBalances.Add(destBalance);
+            }
+
+            // Log the movement as a "RELOCATE"
+            var movement = new StockMovement
             {
                 ItemId = request.ItemId,
-                WarehouseBinId = request.DestinationBinId,
-                Quantity = request.Quantity
+                WarehouseBinId = request.SourceBinId, // Log where it started
+                TransactionType = "RELOCATE",
+                QuantityChanged = request.Quantity,
+                Timestamp = DateTime.UtcNow,
+                PerformedBy = CurrentUsername
             };
-            _context.InventoryBalances.Add(destBalance);
-        }
+            _context.StockMovements.Add(movement);
 
-        // Log the movement as a "RELOCATE"
-        var movement = new StockMovement
-        {
-            ItemId = request.ItemId,
-            WarehouseBinId = request.SourceBinId, // Log where it started
-            TransactionType = "RELOCATE",
-            QuantityChanged = request.Quantity,
-            Timestamp = DateTime.UtcNow,
-            PerformedBy = CurrentUsername
-        };
-        _context.StockMovements.Add(movement);
+            _context.SaveChanges();
 
-        _context.SaveChanges();
-
-        return Ok(new { 
-            Message = $"Successfully relocated {request.Quantity} units from Bin {request.SourceBinId} to Bin {request.DestinationBinId}." 
+            return Ok(new {
+                Message = $"Successfully relocated {request.Quantity} units from Bin {request.SourceBinId} to Bin {request.DestinationBinId}."
+            });
         });
     }
 }
