@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Inventria.Controllers;
 
-[Authorize(Roles = "Admin")]
+[Authorize(Roles = UserRoles.Admin)]
 [Route("api/[controller]")]
 [ApiController]
 public class DashboardController : ControllerBase

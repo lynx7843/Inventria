@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Inventria.Models;
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 
 namespace Inventria.Controllers;
@@ -78,11 +79,15 @@ public class InventoryController : ControllerBase
     [HttpPost("items")]
     public IActionResult CreateItem([FromBody] ItemRequest request)
     {
+        // Surrounding spaces are invisible in the UI but not to the unique index,
+        // so " SKU-1" would be accepted as a second, indistinguishable SKU-1.
+        var sku = request.Sku.Trim();
+
         var newItem = new Item
         {
-            Sku = request.Sku,
-            Name = request.Name,
-            Category = request.Category
+            Sku = sku,
+            Name = request.Name.Trim(),
+            Category = request.Category.Trim()
         };
 
         _context.Items.Add(newItem);
@@ -93,7 +98,7 @@ public class InventoryController : ControllerBase
         }
         catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
         {
-            return BadRequest(new { Message = $"SKU '{request.Sku}' is already used by another item." });
+            return BadRequest(new { Message = $"SKU '{sku}' is already used by another item." });
         }
 
         return Ok(new { Message = "Item created successfully.", Item = newItem });
@@ -105,9 +110,9 @@ public class InventoryController : ControllerBase
         var item = _context.Items.Find(id);
         if (item == null) return NotFound(new { Message = "Item not found." });
 
-        item.Sku = request.Sku;
-        item.Name = request.Name;
-        item.Category = request.Category;
+        item.Sku = request.Sku.Trim();
+        item.Name = request.Name.Trim();
+        item.Category = request.Category.Trim();
 
         try
         {
@@ -115,7 +120,7 @@ public class InventoryController : ControllerBase
         }
         catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
         {
-            return BadRequest(new { Message = $"SKU '{request.Sku}' is already used by another item." });
+            return BadRequest(new { Message = $"SKU '{item.Sku}' is already used by another item." });
         }
 
         return Ok(new { Message = "Item updated successfully." });
@@ -372,8 +377,24 @@ public class InventoryController : ControllerBase
 // Add these request DTO classes at the very bottom of the file
 public class ItemRequest
 {
+    // 64 characters because that is the width of the column, and the column is
+    // that width because a unique index needs a bounded one. Without the limit
+    // an over-long SKU is a truncation error from SQL Server, which reaches the
+    // caller as a 500 rather than as "that is too long".
+    [NotBlank(ErrorMessage = "SKU is required.")]
+    [StringLength(64, ErrorMessage = "SKU cannot be longer than 64 characters.")]
     public string Sku { get; set; } = string.Empty;
+
+    // Name and Category are nvarchar(max) in the database, so these lengths are
+    // not a storage limit - they are the point past which a value stops being a
+    // product name and starts being pasted junk that breaks every table it is
+    // rendered in.
+    [NotBlank(ErrorMessage = "Product name is required.")]
+    [StringLength(200, ErrorMessage = "Product name cannot be longer than 200 characters.")]
     public string Name { get; set; } = string.Empty;
+
+    [NotBlank(ErrorMessage = "Category is required.")]
+    [StringLength(100, ErrorMessage = "Category cannot be longer than 100 characters.")]
     public string Category { get; set; } = string.Empty;
 }
 

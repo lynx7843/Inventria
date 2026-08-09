@@ -49,6 +49,8 @@
 
   // 2. Save Item (Create or Update)
   async function saveItem() {
+    errorMsg = '';
+
     const path = isEditing
       ? `/api/inventory/items/${editingId}`
       : '/api/inventory/items';
@@ -65,9 +67,15 @@
       if (res.ok) {
         closeForm();
         await loadItems(); // Refresh the table
+      } else {
+        // Blank fields, an over-long value or a SKU another item already uses.
+        // The server says which; dropping the response left the form looking
+        // like it had simply ignored the click.
+        const data = await res.json();
+        errorMsg = data.message || 'Failed to save item.';
       }
     } catch (err) {
-      console.error("Failed to save item", err);
+      errorMsg = 'A network error occurred while saving.';
     }
   }
 
@@ -101,6 +109,7 @@
     sku = '';
     name = '';
     category = '';
+    errorMsg = '';
     showForm = true;
   }
 
@@ -110,6 +119,7 @@
     sku = item.sku;
     name = item.name;
     category = item.category;
+    errorMsg = '';
     showForm = true;
   }
 
