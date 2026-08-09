@@ -28,8 +28,13 @@ public class DashboardController : ControllerBase
 
         // 3. Monthly Throughput (Total units moved in the last 30 days)
         var thirtyDaysAgo = DateTime.UtcNow.AddDays(-30);
+        // A relocation writes two rows - out of the source bin, into the
+        // destination - so adding up every row would count those units twice.
+        // Throughput is units moved, and stock moved once, so only the outbound
+        // leg counts here.
         var monthlyThroughput = await _context.StockMovements
             .Where(m => m.Timestamp >= thirtyDaysAgo)
+            .Where(m => m.TransactionType != "RELOCATE" || m.QuantityChanged < 0)
             .SumAsync(m => (int?)Math.Abs(m.QuantityChanged)) ?? 0;
 
         // 4. Category Distribution (Count of unique items per category)

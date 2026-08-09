@@ -329,17 +329,36 @@ public class InventoryController : ControllerBase
                 _context.InventoryBalances.Add(destBalance);
             }
 
-            // Log the movement as a "RELOCATE"
-            var movement = new StockMovement
+            // A relocation is two entries in the ledger, not one. A single row
+            // against the source bin with a positive quantity recorded the
+            // opposite of what happened - the bin that lost stock was credited
+            // with it - and never mentioned the destination at all, so summing a
+            // bin's movements could not reconcile against its InventoryBalance.
+            // One row per side, signed the way the balance moved, keeps that sum
+            // honest for anything that adds up movements without knowing what a
+            // relocation is. Both legs share a timestamp, which is what marks
+            // them as the two halves of one move.
+            var timestamp = DateTime.UtcNow;
+
+            _context.StockMovements.Add(new StockMovement
             {
                 ItemId = request.ItemId,
-                WarehouseBinId = request.SourceBinId, // Log where it started
+                WarehouseBinId = request.SourceBinId,
                 TransactionType = "RELOCATE",
-                QuantityChanged = request.Quantity,
-                Timestamp = DateTime.UtcNow,
+                QuantityChanged = -request.Quantity, // Left the source bin
+                Timestamp = timestamp,
                 PerformedBy = CurrentUsername
-            };
-            _context.StockMovements.Add(movement);
+            });
+
+            _context.StockMovements.Add(new StockMovement
+            {
+                ItemId = request.ItemId,
+                WarehouseBinId = request.DestinationBinId,
+                TransactionType = "RELOCATE",
+                QuantityChanged = request.Quantity, // Arrived in the destination bin
+                Timestamp = timestamp,
+                PerformedBy = CurrentUsername
+            });
 
             _context.SaveChanges();
 

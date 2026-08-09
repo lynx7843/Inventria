@@ -110,11 +110,15 @@
                received {log.quantityChanged} units of {log.itemName}
             {:else if log.transactionType === 'PICK'}
                picked {Math.abs(log.quantityChanged)} units of {log.itemName}
+            {:else if log.quantityChanged < 0}
+               <!-- A relocation logs both of its sides, so the sign says which
+                    half of the move this row is. -->
+               relocated {Math.abs(log.quantityChanged)} units of {log.itemName} out of Bin {log.warehouseBinId}
             {:else}
-               relocated {log.quantityChanged} units of {log.itemName}
+               relocated {log.quantityChanged} units of {log.itemName} into Bin {log.warehouseBinId}
             {/if}
             <br/>
-            <span>{formatTimeAgo(log.timestamp)} • Bin {log.warehouseBinId}</span>
+            <span>{formatTimeAgo(log.timestamp)}{log.transactionType === 'RELOCATE' ? '' : ` • Bin ${log.warehouseBinId}`}</span>
           </li>
         {/each}
       </ul>
