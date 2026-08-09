@@ -127,10 +127,38 @@ public class InventoryController : ControllerBase
         var item = _context.Items.Find(id);
         if (item == null) return NotFound(new { Message = "Item not found." });
 
-        // Note: In a production system, you might want to prevent deletion if the item 
-        // has existing InventoryBalances, or use a "IsActive" flag instead of hard deletion.
+        // Deleting an item used to take its stock down with it - the balance rows
+        // cascaded - and leave its movements behind pointing at an Id that no
+        // longer resolves. Both foreign keys now refuse the delete, so these two
+        // checks exist to say which one is in the way rather than to enforce
+        // anything: the database is what actually holds the line.
+        var quantities = _context.InventoryBalances
+            .Where(b => b.ItemId == id && b.Quantity != 0)
+            .Select(b => b.Quantity)
+            .ToList();
+
+        if (quantities.Count > 0)
+        {
+            return Conflict(new { Message = $"'{item.Name}' has {quantities.Sum()} units on hand across {quantities.Count} bin(s). Move or pick the stock out before deleting it." });
+        }
+
+        var movementCount = _context.StockMovements.Count(m => m.ItemId == id);
+        if (movementCount > 0)
+        {
+            return Conflict(new { Message = $"'{item.Name}' has {movementCount} recorded stock movement(s). Deleting it would destroy that audit history." });
+        }
+
         _context.Items.Remove(item);
-        _context.SaveChanges();
+
+        try
+        {
+            _context.SaveChanges();
+        }
+        catch (DbUpdateException ex) when (ForeignKeyConstraint.WasViolated(ex))
+        {
+            // Stock landed on this item between the checks above and the delete.
+            return Conflict(new { Message = $"'{item.Name}' has just been used in a stock movement and can no longer be deleted." });
+        }
 
         return Ok(new { Message = "Item deleted successfully." });
     }
