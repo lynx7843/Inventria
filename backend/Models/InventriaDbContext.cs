@@ -18,14 +18,39 @@ public class InventriaDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // A RowVersion only guards a row that already exists. Two concurrent
-        // receives for an item/bin pair with no balance row yet would both see
-        // nothing and both insert, splitting the stock across two rows that later
-        // lookups choose between arbitrarily. The unique index makes the second
-        // insert fail so it can be retried against the row the first one created.
-        modelBuilder.Entity<InventoryBalance>()
-            .HasIndex(b => new { b.ItemId, b.WarehouseBinId })
-            .IsUnique();
+        modelBuilder.Entity<InventoryBalance>(balance =>
+        {
+            // A RowVersion only guards a row that already exists. Two concurrent
+            // receives for an item/bin pair with no balance row yet would both see
+            // nothing and both insert, splitting the stock across two rows that later
+            // lookups choose between arbitrarily. The unique index makes the second
+            // insert fail so it can be retried against the row the first one created.
+            balance.HasIndex(b => new { b.ItemId, b.WarehouseBinId }).IsUnique();
+
+            // This relationship used to cascade, which made deleting an item a way
+            // to silently destroy the stock recorded against it: the item row went
+            // and every balance row went with it, on-hand quantity included. A
+            // balance is a count of physical goods on a shelf and deleting a
+            // definition does not empty the shelf, so the database now refuses the
+            // delete instead of following it.
+            balance.HasOne(b => b.Item)
+                .WithMany()
+                .HasForeignKey(b => b.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // StockMovements had no foreign key at all, so a deleted item left its
+        // movements behind pointing at an Id that resolves to nothing - the rows
+        // the dashboard renders with a blank item name. The audit log is the
+        // record of what happened and outlives the item's usefulness, so the
+        // relationship exists to refuse the delete rather than to follow it. No
+        // navigation property: a movement is written and read as a flat row, and
+        // the only thing needed here is the constraint.
+        modelBuilder.Entity<StockMovement>()
+            .HasOne<Item>()
+            .WithMany()
+            .HasForeignKey(m => m.ItemId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // Usernames identify an account to log in as, so two of them is an
         // authentication bug, not just untidy data. The Any() check in

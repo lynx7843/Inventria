@@ -45,7 +45,7 @@ public class DashboardController : ControllerBase
         var totalItems = distribution.Sum(d => d.Count);
 
         // 5. Recent System Activity (Last 5 transactions)
-        var recentActivity = await _context.StockMovements
+        var movements = await _context.StockMovements
             .OrderByDescending(m => m.Timestamp)
             .Take(5)
             .Select(m => new {
@@ -55,9 +55,25 @@ public class DashboardController : ControllerBase
                 m.PerformedBy,
                 // Join to get the actual item name instead of just the ID
                 ItemName = _context.Items.Where(i => i.Id == m.ItemId).Select(i => i.Name).FirstOrDefault(),
+                m.ItemId,
                 m.WarehouseBinId
             })
             .ToListAsync();
+
+        // Item deletion can no longer strand a movement, but rows written before
+        // that was true still point at an item that is gone and the join returns
+        // nothing for them. Naming the Id that went missing beats rendering the
+        // sentence with a hole where the item should be.
+        var recentActivity = movements
+            .Select(m => new {
+                m.TransactionType,
+                m.QuantityChanged,
+                m.Timestamp,
+                m.PerformedBy,
+                ItemName = m.ItemName ?? $"deleted item #{m.ItemId}",
+                m.WarehouseBinId
+            })
+            .ToList();
 
         return Ok(new {
             TotalUsers = totalUsers,

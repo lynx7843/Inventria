@@ -13,7 +13,8 @@
 
   let items = $state([]);
   let isLoading = $state(true);
-  
+  let errorMsg = $state('');
+
   // Form State
   let showForm = $state(false);
   let isEditing = $state(false);
@@ -73,14 +74,23 @@
   // 3. Delete Item
   async function deleteItem(id) {
     if (!confirm('Are you sure you want to delete this item?')) return;
-    
+
+    errorMsg = '';
+
     try {
       const res = await apiFetch(`/api/inventory/items/${id}`, {
         method: 'DELETE'
       });
-      if (res.ok) await loadItems();
+      if (res.ok) {
+        await loadItems();
+      } else {
+        // The server refuses to delete an item that still holds stock or has
+        // movement history. Silently doing nothing looked like a broken button.
+        const data = await res.json();
+        errorMsg = data.message || 'Failed to delete item.';
+      }
     } catch (err) {
-      console.error("Failed to delete", err);
+      errorMsg = 'A network error occurred while deleting.';
     }
   }
 
@@ -122,6 +132,10 @@
       <button class="btn-solid" onclick={openNewForm}>+ Add New SKU</button>
     {/if}
   </div>
+
+  {#if errorMsg}
+    <div class="alert alert-error">{errorMsg}</div>
+  {/if}
 
   {#if showForm}
     <div class="panel form-panel">
@@ -206,4 +220,7 @@
   .action-btns { display: flex; gap: 0.5rem; justify-content: flex-end; }
   .btn-icon { background: none; border: none; font-size: 1.1rem; cursor: pointer; opacity: 0.6; transition: opacity 0.2s; padding: 0.25rem; }
   .btn-icon:hover { opacity: 1; }
+
+  .alert { padding: 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1.5rem; font-weight: 500; }
+  .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
 </style>
