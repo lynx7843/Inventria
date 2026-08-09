@@ -2,6 +2,7 @@ using Inventria;
 using Inventria.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Cryptography;
@@ -89,6 +90,26 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 
+// [ApiController] rejects a request whose DTO fails validation before the action
+// runs, and by default answers with a ProblemDetails document. Every other error
+// in this API is { message: "..." } and that is the one field the frontend reads,
+// so a validation failure is reshaped to match - otherwise the user gets the
+// form's generic fallback text instead of the sentence explaining what is wrong
+// with what they typed.
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var message = context.ModelState.Values
+            .SelectMany(state => state.Errors)
+            .Select(error => error.ErrorMessage)
+            .FirstOrDefault(text => !string.IsNullOrWhiteSpace(text))
+            ?? "The request was not valid.";
+
+        return new BadRequestObjectResult(new { Message = message });
+    };
+});
+
 // Backs the app.MapOpenApi() endpoint below; without it the document service
 // is never registered and the mapped route cannot resolve one.
 builder.Services.AddOpenApi();
@@ -159,7 +180,7 @@ static void SeedFirstAdmin(WebApplication app)
     {
         Username = username,
         Password = BCrypt.Net.BCrypt.HashPassword(password),
-        Role = "Admin"
+        Role = UserRoles.Admin
     });
     db.SaveChanges();
 

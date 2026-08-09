@@ -35,8 +35,11 @@
       // cookie the browser attaches on its own. Only the display name and role
       // are kept, and neither is a credential: the role is what lets a page tell
       // an Admin from an Employee, while the API re-checks it on every request.
+      // The API whitelists the role when an account is created, so this is only
+      // reachable for accounts that predate that check. There is no screen to
+      // send them to, so say who can fix it rather than just naming the fault.
       if (data.role !== 'Admin' && data.role !== 'Employee') {
-        errorMsg = 'Unrecognized user role.';
+        errorMsg = `Your account has an unrecognized role ('${data.role}'). Ask an administrator to set it to Admin or Employee.`;
         return;
       }
 

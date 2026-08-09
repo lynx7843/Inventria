@@ -3,10 +3,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Inventria.Models;
 using BCrypt.Net;
+using System.ComponentModel.DataAnnotations;
 
 namespace Inventria.Controllers;
 
-[Authorize(Roles = "Admin")]
+[Authorize(Roles = UserRoles.Admin)]
 [Route("api/[controller]")]
 [ApiController]
 public class UsersController : ControllerBase
@@ -32,15 +33,28 @@ public class UsersController : ControllerBase
     [HttpPost]
     public IActionResult CreateUser([FromBody] UserRequest request)
     {
+        // The DTO cannot require this: the same shape is used for updates, where
+        // an empty password means "leave it alone". A new account has nothing to
+        // leave alone, so a blank one here would be an account with a hash of ""
+        // as its password.
+        if (string.IsNullOrWhiteSpace(request.Password))
+        {
+            return BadRequest(new { Message = "Password is required for a new user." });
+        }
+
+        // Surrounding spaces are invisible in the UI but not to the unique index,
+        // so " admin" would sit next to "admin" as a second, confusable account.
+        var username = request.Username.Trim();
+
         // Prevent duplicate usernames
-        if (_context.Users.Any(u => u.Username == request.Username))
+        if (_context.Users.Any(u => u.Username == username))
         {
             return BadRequest(new { Message = "Username already exists." });
         }
 
         var newUser = new User
         {
-            Username = request.Username,
+            Username = username,
             Password = BCrypt.Net.BCrypt.HashPassword(request.Password), // Secure hash
             Role = request.Role
         };
@@ -67,17 +81,20 @@ public class UsersController : ControllerBase
         var user = _context.Users.Find(id);
         if (user == null) return NotFound(new { Message = "User not found." });
 
+        var username = request.Username.Trim();
+
         // Check for duplicate username on another account
-        if (_context.Users.Any(u => u.Username == request.Username && u.Id != id))
+        if (_context.Users.Any(u => u.Username == username && u.Id != id))
         {
             return BadRequest(new { Message = "Username already exists." });
         }
 
-        user.Username = request.Username;
+        user.Username = username;
         user.Role = request.Role;
 
-        // Only update the password if the admin actually typed a new one
-        if (!string.IsNullOrEmpty(request.Password))
+        // Only update the password if the admin actually typed a new one - and a
+        // line of spaces is not one, it is a field they tabbed through.
+        if (!string.IsNullOrWhiteSpace(request.Password))
         {
             user.Password = BCrypt.Net.BCrypt.HashPassword(request.Password);
         }
@@ -110,7 +127,26 @@ public class UsersController : ControllerBase
 // Add the DTO at the bottom
 public class UserRequest
 {
+    // 100 characters because that is the width of the column; without the limit
+    // a longer name is a truncation error from SQL Server, which reaches the
+    // caller as a 500 rather than as "that is too long".
+    [NotBlank(ErrorMessage = "Username is required.")]
+    [StringLength(100, ErrorMessage = "Username cannot be longer than 100 characters.")]
     public string Username { get; set; } = string.Empty;
+
+    // Not [NotBlank]: an update sends this empty to mean "keep the current
+    // password", so whether a blank one is allowed depends on the action and is
+    // decided in CreateUser. The cap is BCrypt's - it hashes the first 72 bytes
+    // and ignores the rest, so anything longer is a password whose tail does not
+    // actually protect the account.
+    [StringLength(72, ErrorMessage = "Password cannot be longer than 72 characters.")]
     public string Password { get; set; } = string.Empty;
+
+    // The whitelist. Any other string produces an account that logs in and then
+    // has no screen to land on, and nothing downstream would have caught it:
+    // [Authorize(Roles = ...)] simply never matches, so the account silently
+    // fails every check instead of being rejected here where it can be fixed.
+    [AllowedValues(UserRoles.Admin, UserRoles.Employee,
+        ErrorMessage = "Role must be either Admin or Employee.")]
     public string Role { get; set; } = string.Empty;
 }
