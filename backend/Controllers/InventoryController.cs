@@ -66,15 +66,42 @@ public class InventoryController : ControllerBase
         return Conflict(new { Message = "This stock is being updated by another request. Please try again." });
     }
 
+    // What a caller gets when it asks for a page without saying how big, and the
+    // most it can ask for in one go. The ceiling is the point of the exercise: a
+    // catalogue grows without anyone deciding it should, and this used to answer
+    // with all of it - every row, each carrying its own balance lookup - which
+    // gets slower for every item the warehouse has ever stocked.
+    private const int DefaultPageSize = 25;
+    private const int MaxPageSize = 200;
+
     [HttpGet]
-    public IActionResult GetAllItems()
+    public IActionResult GetAllItems([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
     {
-        // Fetches all items from the SQL Server database, each with what is
-        // actually on the shelves for it. The quantity is summed across bins
-        // because an item is normally in several: the dashboards want "how many
-        // of these do we have", not "how many are in one particular bin", and
-        // without it the stock column had nothing to show but a dash.
-        var items = _context.Items
+        // Clamped rather than rejected: page 0 and a page size of 5000 are a
+        // caller asking for the nearest sensible thing, not a malformed request,
+        // and answering them with the first page of 200 is more useful than a
+        // 400 they have to write code to handle.
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+
+        // Ordered because paging demands it: without an ORDER BY, SQL Server is
+        // free to return rows in any order it likes, and "any order it likes"
+        // can differ between two queries - so an item could appear on both page
+        // one and page two, or on neither. By name because that is the column
+        // people read down; by Id after it so items sharing a name still have a
+        // fixed order.
+        var query = _context.Items.OrderBy(i => i.Name).ThenBy(i => i.Id);
+
+        var totalCount = query.Count();
+
+        // Each item carries what is actually on the shelves for it, summed across
+        // bins because an item is normally in several: the dashboards want "how
+        // many of these do we have", not "how many are in one particular bin".
+        // That sum is a lookup per row, which is the other reason to send a page
+        // of them rather than the catalogue.
+        var items = query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(i => new
             {
                 i.Id,
@@ -87,7 +114,14 @@ public class InventoryController : ControllerBase
             })
             .ToList();
 
-        return Ok(items);
+        return Ok(new
+        {
+            Items = items,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+        });
     }
 
     // --- MASTER ITEM CRUD OPERATIONS ---

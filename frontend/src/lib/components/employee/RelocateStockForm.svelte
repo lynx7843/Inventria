@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { apiFetch, apiErrorMessage } from '$lib/api';
   import { endExpiredSession } from '$lib/auth';
-  import { fetchBins, fetchItems, binLabel, itemLabel, parseUnits, type Option } from '$lib/inventory';
+  import { fetchBins, fetchAllItems, binLabel, itemLabel, parseUnits, type Option } from '$lib/inventory';
 
   let itemId = $state('');
   let sourceBinId = $state('');
@@ -34,7 +34,7 @@
 
   onMount(async () => {
     try {
-      const [items, bins] = await Promise.all([fetchItems(), fetchBins()]);
+      const [items, bins] = await Promise.all([fetchAllItems(), fetchBins()]);
       itemOptions = items.map((item) => ({ value: item.id, label: itemLabel(item) }));
       binOptions = bins.map((bin) => ({ value: bin.id, label: binLabel(bin) }));
     } catch (err) {
