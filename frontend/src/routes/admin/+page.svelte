@@ -2,8 +2,8 @@
   import Sidebar from '$lib/components/shared/Sidebar.svelte';
   import Header from '$lib/components/shared/Header.svelte';
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
-  import { requireSession } from '$lib/auth';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
+  import { endExpiredSession, requireSession } from '$lib/auth';
 
   // Gates the markup below: nothing renders until the guard confirms an Admin,
   // so a redirect never flashes the dashboard on its way out.
@@ -63,12 +63,12 @@
 
       if (response.status === 401 || usersResponse.status === 401) {
         // Token is missing or expired, kick them back to login
-        window.location.href = '/';
+        endExpiredSession();
         return;
       }
 
-      if (!response.ok) throw new Error('Failed to load dashboard data.');
-      if (!usersResponse.ok) throw new Error('Failed to load the user list.');
+      if (!response.ok) throw new Error(await apiErrorMessage(response, 'Failed to load dashboard data.'));
+      if (!usersResponse.ok) throw new Error(await apiErrorMessage(usersResponse, 'Failed to load the user list.'));
 
       stats = await response.json();
       users = await usersResponse.json();

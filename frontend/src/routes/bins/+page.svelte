@@ -4,8 +4,8 @@
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
-  import { requireSession } from '$lib/auth';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
+  import { endExpiredSession, requireSession } from '$lib/auth';
   import type { WarehouseBin } from '$lib/inventory';
 
   // Gates the markup below. No role list: bins are part of the warehouse map
@@ -30,12 +30,22 @@
     try {
       const res = await apiFetch('/api/warehousebins');
 
-      if (res.ok) bins = await res.json();
-      else if (res.status === 401) {
-        window.location.href = '/';
+      if (res.ok) {
+        bins = await res.json();
+        return;
       }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      // Left unsaid, this reads as "there are no bins" - which sends someone off
+      // to create one that already exists.
+      errorMsg = await apiErrorMessage(res, 'Failed to load bins.');
     } catch (err) {
       console.error(err);
+      errorMsg = 'A network error occurred while loading bins.';
     } finally {
       isLoading = false;
     }
@@ -66,13 +76,19 @@
       if (res.ok) {
         closeForm();
         await loadBins();
-      } else {
-        // Blank fields, an over-long value, or an address another bin already
-        // occupies. The server says which.
-        const data = await res.json();
-        errorMsg = data.message || 'Failed to save bin.';
+        return;
       }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      // Blank fields, an over-long value, or an address another bin already
+      // occupies. The server says which.
+      errorMsg = await apiErrorMessage(res, 'Failed to save bin.');
     } catch (err) {
+      console.error(err);
       errorMsg = 'A network error occurred while saving.';
     }
   }
@@ -88,13 +104,19 @@
       });
       if (res.ok) {
         await loadBins();
-      } else {
-        // The server refuses to delete a bin that still holds stock or has
-        // movement history recorded against it.
-        const data = await res.json();
-        errorMsg = data.message || 'Failed to delete bin.';
+        return;
       }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      // The server refuses to delete a bin that still holds stock or has
+      // movement history recorded against it.
+      errorMsg = await apiErrorMessage(res, 'Failed to delete bin.');
     } catch (err) {
+      console.error(err);
       errorMsg = 'A network error occurred while deleting.';
     }
   }

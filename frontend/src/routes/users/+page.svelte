@@ -4,20 +4,23 @@
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
-  import { requireSession } from '$lib/auth';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
+  import { endExpiredSession, requireSession } from '$lib/auth';
 
   // Gates the markup below: nothing renders until the guard confirms an Admin.
   let allowed = $state(false);
 
-  let users = $state([]);
+  /** An account as GET /api/users returns it - no password ever leaves the API. */
+  type Account = { id: number; username: string; role: string };
+
+  let users: Account[] = $state([]);
   let isLoading = $state(true);
   let errorMsg = $state('');
   
   // Form State
   let showForm = $state(false);
   let isEditing = $state(false);
-  let editingId = $state(null);
+  let editingId: number | null = $state(null);
   
   let username = $state('');
   let password = $state('');
@@ -32,13 +35,14 @@
         users = await res.json();
       } else if (res.status === 401) {
         // Session is missing or expired, kick them back to login
-        window.location.href = '/';
+        endExpiredSession();
         return;
       } else {
-        throw new Error('Failed to fetch users');
+        errorMsg = await apiErrorMessage(res, 'Failed to load users.');
       }
     } catch (err) {
-      errorMsg = err instanceof Error ? err.message : 'Network error';
+      console.error(err);
+      errorMsg = 'A network error occurred while loading users.';
     } finally {
       isLoading = false;
     }
@@ -73,23 +77,45 @@
       if (res.ok) {
         closeForm();
         await loadUsers();
-      } else {
-        const data = await res.json();
-        errorMsg = data.message || 'Failed to save user.';
+        return;
       }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      errorMsg = await apiErrorMessage(res, 'Failed to save user.');
     } catch (err) {
+      console.error(err);
       errorMsg = 'A network error occurred while saving.';
     }
   }
 
-  async function deleteUser(id) {
+  async function deleteUser(id: number) {
     if (!confirm('WARNING: Are you sure you want to permanently delete this user?')) return;
-    
+
+    errorMsg = '';
+
     try {
       const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
-      if (res.ok) await loadUsers();
+
+      if (res.ok) {
+        await loadUsers();
+        return;
+      }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      // A refused delete used to do nothing at all - no message, only a console
+      // line nobody has open - so the row stayed put and the button looked dead.
+      errorMsg = await apiErrorMessage(res, 'Failed to delete user.');
     } catch (err) {
-      console.error("Failed to delete user", err);
+      console.error(err);
+      errorMsg = 'A network error occurred while deleting.';
     }
   }
 
@@ -103,7 +129,7 @@
     showForm = true;
   }
 
-  function openEditForm(user) {
+  function openEditForm(user: Account) {
     isEditing = true;
     editingId = user.id;
     username = user.username;
@@ -133,13 +159,16 @@
     {/if}
   </div>
 
+  <!-- Page level, not inside the form panel. A failed delete or a failed load
+       happens with the form closed, so an alert that only renders with the form
+       is an error message nobody can see. -->
+  {#if errorMsg}
+    <div class="alert alert-error">{errorMsg}</div>
+  {/if}
+
   {#if showForm}
     <div class="panel form-panel">
       <h3>{isEditing ? 'Edit Existing User' : 'Register New User'}</h3>
-      
-      {#if errorMsg}
-        <div class="alert alert-error">{errorMsg}</div>
-      {/if}
 
       <form onsubmit={(e) => { e.preventDefault(); saveUser(); }} class="form-grid">
         <div class="input-row">

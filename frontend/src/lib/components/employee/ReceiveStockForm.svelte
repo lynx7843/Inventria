@@ -3,7 +3,8 @@
   import SelectField from '$lib/components/shared/SelectField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
+  import { endExpiredSession } from '$lib/auth';
   import { fetchBins, fetchItems, binLabel, itemLabel, type Option } from '$lib/inventory';
 
   // State variables for the form inputs. The two ids are chosen from what the
@@ -57,11 +58,18 @@
         })
       });
 
-      const data = await response.json();
+      // Status first: a 401 is answered with no body at all, so parsing before
+      // this point turned an expired session into "a network error occurred".
+      if (response.status === 401) {
+        endExpiredSession();
+        return;
+      }
 
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to process transaction.');
+        throw new Error(await apiErrorMessage(response, 'Failed to process transaction.'));
       }
+
+      const data = await response.json();
 
       // Show success message and clear the form
       message = data.message;

@@ -25,3 +25,29 @@ export function apiUrl(path: string): string {
 export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
 	return fetch(apiUrl(path), { ...init, credentials: 'include' });
 }
+
+/**
+ * The sentence to show the user for a failed request.
+ *
+ * Every error this API returns deliberately carries a `message`, and that
+ * sentence is almost always more useful than anything the page could invent -
+ * "SKU-1 is already used by another item" rather than "failed to save". But not
+ * every failure comes from the API: an expired session is answered by the
+ * framework as a bare 401 with no body at all, a crash can arrive as an HTML
+ * error page, and a proxy in front of the API can return whatever it likes.
+ * Parsing those as JSON throws, and callers that let it throw reported a genuine
+ * 401 or 500 as "a network error occurred" - the request reached the server and
+ * was answered, so that description was simply wrong.
+ */
+export async function apiErrorMessage(res: Response, fallback: string): Promise<string> {
+	try {
+		const data = await res.json();
+		if (data && typeof data.message === 'string' && data.message.trim()) {
+			return data.message;
+		}
+	} catch {
+		// No JSON body to read; the fallback below is the honest answer.
+	}
+
+	return fallback;
+}
