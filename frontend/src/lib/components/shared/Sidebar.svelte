@@ -3,8 +3,13 @@
   import { apiFetch } from '$lib/api';
   import { clearSession, getRole, homeFor } from '$lib/auth';
 
+  // Which nav entry to mark as current. A string rather than a union of the
+  // page names: the entries are data here, and a page that misspells its own
+  // name simply highlights nothing.
   let {
     activePage = "Dashboard"
+  }: {
+    activePage?: string;
   } = $props();
 
   // Employees and Admins have different dashboards, and only an Admin has a

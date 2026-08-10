@@ -5,6 +5,11 @@
   // `options` is a list of { value, label }; `placeholder` is the disabled first
   // entry, and `emptyLabel` replaces it when there is nothing to choose from -
   // an empty dropdown otherwise looks broken rather than unpopulated.
+  // The option shape is spelled out here rather than imported from $lib/inventory:
+  // this component knows about dropdowns, not about warehouses, and the two
+  // shapes are structurally identical so an Option[] still fits.
+  type Choice = { value: number | string; label: string };
+
   let {
     id,
     label,
@@ -14,6 +19,15 @@
     emptyLabel = 'None available',
     required = false,
     disabled = false
+  }: {
+    id: string;
+    label: string;
+    options?: Choice[];
+    value: string;
+    placeholder?: string;
+    emptyLabel?: string;
+    required?: boolean;
+    disabled?: boolean;
   } = $props();
 </script>
 
