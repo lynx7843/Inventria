@@ -226,7 +226,7 @@ app.UseCors("AllowSvelteFrontend");
 // so an OPTIONS request never spends a caller's login budget.
 app.UseRateLimiter();
 
-// 4. Enable Authentication & Authorization (Must be in this exact order)
+// 5. Enable Authentication & Authorization (Must be in this exact order)
 app.UseAuthentication();
 app.UseAuthorization();
 

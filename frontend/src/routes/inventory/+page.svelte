@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import { apiFetch, apiErrorMessage } from '$lib/api';
   import { endExpiredSession, requireSession } from '$lib/auth';
-  import type { Item } from '$lib/inventory';
+  import { fetchItemPage, type Item } from '$lib/inventory';
 
   // Gates the markup below. No role list: Admins and Employees both manage
   // inventory, so this only requires that someone is signed in.
@@ -15,6 +15,13 @@
   let items: Item[] = $state([]);
   let isLoading = $state(true);
   let errorMsg = $state('');
+
+  // Where in the catalogue this table is. The API serves a page at a time, so
+  // the table has to say which one and offer the way to the rest.
+  const pageSize = 25;
+  let page = $state(1);
+  let totalPages = $state(1);
+  let totalCount = $state(0);
 
   // Form State
   let showForm = $state(false);
@@ -25,35 +32,40 @@
   let name = $state('');
   let category = $state('');
 
-  // 1. Fetch All Items (Read)
+  // 1. Fetch One Page Of Items (Read)
   async function loadItems() {
     isLoading = true;
     try {
-      const res = await apiFetch('/api/inventory');
+      const result = await fetchItemPage(page, pageSize);
 
-      if (res.ok) {
-        items = await res.json();
-        return;
+      items = result.items;
+      totalPages = result.totalPages;
+      totalCount = result.totalCount;
+
+      // Deleting the last item on the last page leaves this table looking at a
+      // page that no longer exists. Step back rather than show an empty table
+      // that reads as "no items".
+      if (items.length === 0 && page > 1) {
+        page = Math.min(page - 1, Math.max(result.totalPages, 1));
+        await loadItems();
       }
-
-      if (res.status === 401) {
-        endExpiredSession();
-        return;
-      }
-
-      // Anything else used to be swallowed: the table stayed empty and said "No
-      // items found", which is a claim about the warehouse rather than an
-      // admission that the request failed. Someone looking at that would
-      // reasonably conclude their stock had vanished.
-      errorMsg = await apiErrorMessage(res, 'Failed to load items.');
     } catch (err) {
-      // The request never completed - the API is down, or the browser is
-      // offline. This is the only case that is genuinely a network error.
+      // fetchItemPage sends an expired session back to login by itself; anything
+      // that reaches here is a failure worth naming. Swallowing it left the
+      // table empty under "No items found", which is a claim about the warehouse
+      // rather than an admission that the request failed.
       console.error(err);
-      errorMsg = 'A network error occurred while loading items.';
+      errorMsg = err instanceof Error ? err.message : 'Failed to load items.';
     } finally {
       isLoading = false;
     }
+  }
+
+  async function goToPage(next: number) {
+    if (next < 1 || next > totalPages || next === page) return;
+    page = next;
+    errorMsg = '';
+    await loadItems();
   }
 
   onMount(() => {
@@ -89,6 +101,9 @@
 
       if (res.ok) {
         closeForm();
+        // A saved item sorts by name and may belong on another page entirely;
+        // the first page is where someone who just created one starts looking.
+        if (!isEditing) page = 1;
         await loadItems(); // Refresh the table
         return;
       }
@@ -234,6 +249,18 @@
         {/if}
       </tbody>
     </table>
+
+    {#if totalCount > 0}
+      <div class="pager">
+        <span class="pager-status">
+          Showing {items.length} of {totalCount} item{totalCount === 1 ? '' : 's'} &middot; page {page} of {totalPages}
+        </span>
+        <div class="pager-buttons">
+          <button class="btn-outline" onclick={() => goToPage(page - 1)} disabled={page <= 1 || isLoading}>Previous</button>
+          <button class="btn-outline" onclick={() => goToPage(page + 1)} disabled={page >= totalPages || isLoading}>Next</button>
+        </div>
+      </div>
+    {/if}
   </div>
 </main>
 {/if}
@@ -268,6 +295,11 @@
   .action-btns { display: flex; gap: 0.5rem; justify-content: flex-end; }
   .btn-icon { background: none; border: none; font-size: 1.1rem; cursor: pointer; opacity: 0.6; transition: opacity 0.2s; padding: 0.25rem; }
   .btn-icon:hover { opacity: 1; }
+
+  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
+  .pager-status { font-size: 0.8rem; color: #64748b; }
+  .pager-buttons { display: flex; gap: 0.5rem; }
+  .pager-buttons .btn-outline:disabled { color: #94a3b8; border-color: #e2e8f0; cursor: not-allowed; }
 
   .alert { padding: 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1.5rem; font-weight: 500; }
   .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }

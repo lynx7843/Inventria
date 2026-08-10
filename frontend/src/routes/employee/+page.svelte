@@ -7,7 +7,7 @@
   import { onMount } from 'svelte';
   import { apiFetch, apiErrorMessage } from '$lib/api';
   import { endExpiredSession, requireSession } from '$lib/auth';
-  import { fetchItems, type Item } from '$lib/inventory';
+  import { fetchItemPage, type Item } from '$lib/inventory';
 
   // Gates the markup below. No role list: the stock movements on this page are
   // open to Admins as well, so this only requires that someone is signed in.
@@ -28,6 +28,13 @@
     pickedToday: 0
   });
 
+  // This table is an overview, not the master list, so it shows a page at a
+  // time like the Inventory screen does rather than the whole catalogue.
+  const pageSize = 25;
+  let page = $state(1);
+  let totalPages = $state(1);
+  let totalCount = $state(0);
+
   // Track which transaction form is visible
   let activeTab = $state('receive');
 
@@ -37,8 +44,8 @@
     allowed = true;
 
     try {
-      const [items, statsResponse] = await Promise.all([
-        fetchItems(),
+      const [itemPage, statsResponse] = await Promise.all([
+        fetchItemPage(page, pageSize),
         apiFetch('/api/dashboard/employee')
       ]);
 
@@ -52,7 +59,9 @@
         throw new Error(await apiErrorMessage(statsResponse, 'Failed to load dashboard totals.'));
       }
 
-      inventoryItems = items;
+      inventoryItems = itemPage.items;
+      totalPages = itemPage.totalPages;
+      totalCount = itemPage.totalCount;
       stats = await statsResponse.json();
     } catch (err) {
       errorMsg = err instanceof Error ? err.message : 'Unknown error occurred.';
@@ -60,6 +69,22 @@
       isLoading = false;
     }
   });
+
+  async function goToPage(next: number) {
+    if (next < 1 || next > totalPages || next === page) return;
+
+    try {
+      const itemPage = await fetchItemPage(next, pageSize);
+
+      inventoryItems = itemPage.items;
+      totalPages = itemPage.totalPages;
+      totalCount = itemPage.totalCount;
+      page = next;
+    } catch (err) {
+      console.error(err);
+      errorMsg = err instanceof Error ? err.message : 'Failed to load items.';
+    }
+  }
 </script>
 
 {#if allowed}
@@ -191,6 +216,18 @@
         {/if}
       </tbody>
     </table>
+
+    {#if totalCount > 0}
+      <div class="pager">
+        <span class="pager-status">
+          Showing {inventoryItems.length} of {totalCount} item{totalCount === 1 ? '' : 's'} &middot; page {page} of {totalPages}
+        </span>
+        <div class="pager-buttons">
+          <button class="pager-btn" onclick={() => goToPage(page - 1)} disabled={page <= 1}>Previous</button>
+          <button class="pager-btn" onclick={() => goToPage(page + 1)} disabled={page >= totalPages}>Next</button>
+        </div>
+      </div>
+    {/if}
   </div>
 </main>
 {/if}
@@ -224,6 +261,13 @@
   .data-table td { padding: 1rem; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; color: #475569; }
   .data-table td strong { color: #0f172a; }
   
+  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
+  .pager-status { font-size: 0.8rem; color: #64748b; }
+  .pager-buttons { display: flex; gap: 0.5rem; }
+  .pager-btn { background: white; color: #475569; border: 1px solid #cbd5e1; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; cursor: pointer; }
+  .pager-btn:hover:not(:disabled) { background: #f1f5f9; }
+  .pager-btn:disabled { color: #94a3b8; border-color: #e2e8f0; cursor: not-allowed; }
+
   .badge { padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
   .badge.in-stock { background: #dcfce7; color: #166534; }
   .badge.out-stock { background: #e2e8f0; color: #475569; }

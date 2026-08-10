@@ -71,8 +71,54 @@ async function getJson<T>(path: string, what: string): Promise<T> {
 	return res.json();
 }
 
-export function fetchItems(): Promise<Item[]> {
-	return getJson<Item[]>('/api/inventory', 'items');
+/** One page of items, as `GET /api/inventory` returns it. */
+export type ItemPage = {
+	items: Item[];
+	page: number;
+	pageSize: number;
+	totalCount: number;
+	totalPages: number;
+};
+
+/** The page size the API uses when asked for the largest page it will serve. */
+const MAX_PAGE_SIZE = 200;
+
+/**
+ * A single page of items, for the screens that show a table someone reads.
+ */
+export function fetchItemPage(page = 1, pageSize = 25): Promise<ItemPage> {
+	return getJson<ItemPage>(`/api/inventory?page=${page}&pageSize=${pageSize}`, 'items');
+}
+
+/**
+ * Every item, collected a page at a time.
+ *
+ * The dropdowns on the stock forms have to offer the whole catalogue - an item
+ * missing from the list is an item nobody can receive - so paging the wire
+ * cannot mean paging what they show. Requests run one after another because
+ * each one's answer says whether there is another page to ask for.
+ *
+ * The cap is a guard against a runaway loop, not a supported catalogue size: a
+ * warehouse with more items than this has outgrown picking from a dropdown and
+ * wants a searchable field, which is a bigger change than this one. If it is
+ * ever hit, the console says so rather than the list quietly ending early.
+ */
+export async function fetchAllItems(): Promise<Item[]> {
+	const maxRequests = 25;
+	const collected: Item[] = [];
+
+	for (let page = 1; page <= maxRequests; page++) {
+		const result = await fetchItemPage(page, MAX_PAGE_SIZE);
+		collected.push(...result.items);
+
+		if (page >= result.totalPages) return collected;
+	}
+
+	console.warn(
+		`Stopped after ${maxRequests} pages of items; the pickers are showing the first ${collected.length}.`
+	);
+
+	return collected;
 }
 
 export function fetchBins(): Promise<WarehouseBin[]> {

@@ -30,8 +30,15 @@ Content-Type: application/json
 
 ### ---------------------------------------------------------------- MASTER ITEMS
 
-### Every item, each with the units on hand summed across the bins holding it.
+### One page of items, each with the units on hand summed across the bins holding
+### it. Answers { items, page, pageSize, totalCount, totalPages }. Defaults to
+### page 1 of 25; page and pageSize are clamped rather than rejected, so
+### ?pageSize=5000 gets the largest page served, which is 200.
 GET {{inventria_HostAddress}}/api/inventory
+Accept: application/json
+
+### The same, asking for a specific page.
+GET {{inventria_HostAddress}}/api/inventory?page=2&pageSize=50
 Accept: application/json
 
 ### Create an item. SKUs are unique and compared after trimming.
