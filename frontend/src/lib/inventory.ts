@@ -6,6 +6,8 @@ export type Item = {
 	sku: string;
 	name: string;
 	category: string;
+	/** Units on the shelves for this item, summed across every bin holding it. */
+	quantityOnHand: number;
 };
 
 /** A storage location, as `GET /api/warehousebins` returns it. */

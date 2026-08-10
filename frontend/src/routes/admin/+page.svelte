@@ -9,7 +9,30 @@
   // so a redirect never flashes the dashboard on its way out.
   let allowed = $state(false);
 
-  let stats = $state({
+  // The shapes GET /api/dashboard/admin and GET /api/users answer with. Spelled
+  // out because an untyped $state([]) infers never[], which makes every field
+  // read off a row an error.
+  type CategoryCount = { category: string; count: number };
+
+  type ActivityLog = {
+    transactionType: string;
+    quantityChanged: number;
+    timestamp: string;
+    performedBy: string;
+    itemName: string;
+    warehouseBinId: number | null;
+  };
+
+  type Account = { id: number; username: string; role: string };
+
+  let stats: {
+    totalUsers: number;
+    totalStockQuantity: number;
+    monthlyThroughput: number;
+    distribution: CategoryCount[];
+    totalUniqueItems: number;
+    recentActivity: ActivityLog[];
+  } = $state({
     totalUsers: 0,
     totalStockQuantity: 0,
     monthlyThroughput: 0,
@@ -17,7 +40,12 @@
     totalUniqueItems: 0,
     recentActivity: []
   });
-  
+
+  // The accounts that actually exist. The table below used to be three invented
+  // people with invented email addresses, sitting under real figures - which
+  // makes every real figure on the page look invented too.
+  let users: Account[] = $state([]);
+
   let isLoading = $state(true);
   let errorMsg = $state('');
 
@@ -26,17 +54,24 @@
     allowed = true;
 
     try {
-      const response = await apiFetch('/api/dashboard/admin');
-      
-      if (response.status === 401) {
+      // Both are Admin-only and this page is already behind that check, so they
+      // go out together rather than one after the other.
+      const [response, usersResponse] = await Promise.all([
+        apiFetch('/api/dashboard/admin'),
+        apiFetch('/api/users')
+      ]);
+
+      if (response.status === 401 || usersResponse.status === 401) {
         // Token is missing or expired, kick them back to login
         window.location.href = '/';
         return;
       }
-      
+
       if (!response.ok) throw new Error('Failed to load dashboard data.');
-      
+      if (!usersResponse.ok) throw new Error('Failed to load the user list.');
+
       stats = await response.json();
+      users = await usersResponse.json();
     } catch (err) {
       errorMsg = err instanceof Error ? err.message : 'Unknown error occurred.';
     } finally {
@@ -45,7 +80,7 @@
   });
 
   // Helper function to format dates elegantly
-  function formatTimeAgo(dateString) {
+  function formatTimeAgo(dateString: string) {
     const date = new Date(dateString);
     return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
@@ -53,14 +88,17 @@
 
 {#if allowed}
 <Sidebar activePage="Dashboard" />
-<Header userName="Admin User" role="SYSTEM ROOT" />
+<Header />
 
 <main class="dashboard-content">
   <div class="stats-grid">
+    <!-- The bar under this figure was pinned to 100% - it was a full bar whatever
+         the number above it said, because there is no capacity recorded anywhere
+         to be a fraction of. A meter with no denominator is decoration that
+         reads as information. -->
     <div class="stat-card">
       <h4>TOTAL STOCK (UNITS)</h4>
       <div class="value">{stats.totalStockQuantity.toLocaleString()}</div>
-      <div class="progress-bar"><div class="fill" style="width: 100%"></div></div>
       <p class="subtext">Currently stored in warehouse</p>
     </div>
     <div class="stat-card">
@@ -131,34 +169,30 @@
       <h3>User Management</h3>
       <div class="actions"><button class="btn-outline">Export</button><button class="btn-solid">+ Add New User</button></div>
     </div>
+    <!-- Only the columns the API has answers for. Status and last-active went
+         with the invented people: nothing records whether an account is on
+         leave, and nothing records when it was last used, so anything in those
+         columns would be the same fiction in a new costume. -->
     <table class="data-table">
       <thead>
         <tr>
-          <th>EMPLOYEE</th>
+          <th>ACCOUNT</th>
           <th>ROLE</th>
-          <th>STATUS</th>
-          <th>LAST ACTIVE</th>
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td><strong>Alice Smith</strong><br/><span class="sub">alice.s@inventria.com</span></td>
-          <td>Inventory Manager</td>
-          <td><span class="badge active">ACTIVE</span></td>
-          <td>Today, 09:42 AM</td>
-        </tr>
-        <tr>
-          <td><strong>Bob Johnson</strong><br/><span class="sub">b.johnson@inventria.com</span></td>
-          <td>Warehouse Staff</td>
-          <td><span class="badge active">ACTIVE</span></td>
-          <td>2h ago</td>
-        </tr>
-        <tr>
-          <td><strong>Charlie Lee</strong><br/><span class="sub">clee@inventria.com</span></td>
-          <td>Quality Control</td>
-          <td><span class="badge leave">ON LEAVE</span></td>
-          <td>3 days ago</td>
-        </tr>
+        {#if isLoading}
+          <tr><td colspan="2" class="empty-state">Loading users...</td></tr>
+        {:else if users.length === 0}
+          <tr><td colspan="2" class="empty-state">No users found.</td></tr>
+        {:else}
+          {#each users as user}
+            <tr>
+              <td><strong>{user.username}</strong><br/><span class="sub">#{user.id}</span></td>
+              <td><span class="badge {user.role === 'Admin' ? 'admin' : 'employee'}">{user.role}</span></td>
+            </tr>
+          {/each}
+        {/if}
       </tbody>
     </table>
   </div>
@@ -171,9 +205,6 @@
   .stat-card { background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; }
   .stat-card h4 { margin: 0 0 1rem 0; font-size: 0.75rem; color: #64748b; letter-spacing: 0.5px; }
   .stat-card .value { font-size: 2rem; font-weight: 700; color: #0f172a; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
-  .trend.pos { font-size: 0.85rem; color: #0b6b36; font-weight: 500; }
-  .progress-bar { width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; margin-bottom: 0.5rem; overflow: hidden; }
-  .progress-bar .fill { height: 100%; background: #0b6b36; }
   .stat-card .subtext { margin: 0; font-size: 0.8rem; color: #64748b; }
   .system-health { background: #0b6b36; border-color: #0b6b36; }
   .text-white { color: white !important; }
@@ -190,7 +221,6 @@
   .activity-list li::before { content: ''; position: absolute; left: 0; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
   .activity-list li:first-child::before { background: #0b6b36; }
   .activity-list li span { font-size: 0.75rem; color: #64748b; display: block; margin-top: 0.25rem; }
-  .text-red { color: #ef4444; }
   
   .mt-1 { margin-top: 1.5rem; }
   .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
@@ -202,6 +232,7 @@
   .data-table td { padding: 1rem; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; }
   .data-table td .sub { font-size: 0.8rem; color: #64748b; }
   .badge { padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
-  .badge.active { background: #dcfce7; color: #166534; }
-  .badge.leave { background: #e0e7ff; color: #3730a3; }
+  .badge.admin { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
+  .badge.employee { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }
+  .empty-state { text-align: center; padding: 2rem; color: #64748b; font-style: italic; }
 </style>

@@ -138,7 +138,7 @@
 
 {#if allowed}
 <Sidebar activePage="Inventory" />
-<Header userName="Admin User" role="SYSTEM ROOT" />
+<Header />
 
 <main class="dashboard-content">
   <div class="page-header">

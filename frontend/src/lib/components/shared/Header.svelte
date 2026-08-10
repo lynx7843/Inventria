@@ -1,7 +1,13 @@
 <script lang="ts">
-  let { 
-    userName = "Admin User", 
-    role = "SYSTEM ROOT" 
+  import { getUsername, getRole } from '$lib/auth';
+
+  // Whoever is actually signed in. Every page used to hand this component a name
+  // typed into the markup - "Admin User" on four of them, "Alice Smith" on the
+  // employee dashboard - so the header greeted the same fictional person no
+  // matter who logged in. The session already knows; ask it.
+  let {
+    userName = getUsername() ?? 'Signed in',
+    role = getRole() ?? ''
   } = $props();
 </script>
 

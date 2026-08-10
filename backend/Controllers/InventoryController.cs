@@ -69,8 +69,24 @@ public class InventoryController : ControllerBase
     [HttpGet]
     public IActionResult GetAllItems()
     {
-        // Fetches all items from the SQL Server database
-        var items = _context.Items.ToList();
+        // Fetches all items from the SQL Server database, each with what is
+        // actually on the shelves for it. The quantity is summed across bins
+        // because an item is normally in several: the dashboards want "how many
+        // of these do we have", not "how many are in one particular bin", and
+        // without it the stock column had nothing to show but a dash.
+        var items = _context.Items
+            .Select(i => new
+            {
+                i.Id,
+                i.Sku,
+                i.Name,
+                i.Category,
+                QuantityOnHand = _context.InventoryBalances
+                    .Where(b => b.ItemId == i.Id)
+                    .Sum(b => (int?)b.Quantity) ?? 0
+            })
+            .ToList();
+
         return Ok(items);
     }
 

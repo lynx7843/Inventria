@@ -5,7 +5,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Inventria.Controllers;
 
-[Authorize(Roles = UserRoles.Admin)]
+// Signed in is the floor; the admin figures below ask for more than that on the
+// action itself. Both attributes have to pass, so moving the role check down
+// opened the employee counters to Employees without loosening anything else.
+[Authorize]
 [Route("api/[controller]")]
 [ApiController]
 public class DashboardController : ControllerBase
@@ -17,6 +20,7 @@ public class DashboardController : ControllerBase
         _context = context;
     }
 
+    [Authorize(Roles = UserRoles.Admin)]
     [HttpGet("admin")]
     public async Task<IActionResult> GetAdminStats()
     {
@@ -87,6 +91,44 @@ public class DashboardController : ControllerBase
             Distribution = distribution,
             TotalUniqueItems = totalItems,
             RecentActivity = recentActivity
+        });
+    }
+
+    // The counters on the warehouse floor's own dashboard, which until now were
+    // four numbers typed into the markup. Each of these is something the database
+    // can actually answer; the two that it could not - a low-stock alert count,
+    // which needs a reorder level no item carries, and an "efficiency rate",
+    // which was never defined as anything - are gone rather than approximated.
+    [HttpGet("employee")]
+    public async Task<IActionResult> GetEmployeeStats()
+    {
+        var unitsOnHand = await _context.InventoryBalances.SumAsync(b => (int?)b.Quantity) ?? 0;
+        var skusTracked = await _context.Items.CountAsync();
+
+        // "Today" is the UTC day, because that is the clock every movement is
+        // stamped with. A warehouse that wants its own local day boundary needs
+        // to say which timezone it is in, and nothing here records that yet.
+        var startOfDay = DateTime.UtcNow.Date;
+
+        var movementsToday = _context.StockMovements.Where(m => m.Timestamp >= startOfDay);
+
+        // RECEIVE and PICK only: a relocation moves units between bins without
+        // any arriving or leaving, and counting its legs here would make a shuffle
+        // look like a day's work.
+        var receivedToday = await movementsToday
+            .Where(m => m.TransactionType == "RECEIVE")
+            .SumAsync(m => (int?)m.QuantityChanged) ?? 0;
+
+        var pickedToday = await movementsToday
+            .Where(m => m.TransactionType == "PICK")
+            .SumAsync(m => (int?)-m.QuantityChanged) ?? 0;
+
+        return Ok(new
+        {
+            UnitsOnHand = unitsOnHand,
+            SkusTracked = skusTracked,
+            ReceivedToday = receivedToday,
+            PickedToday = pickedToday
         });
     }
 }

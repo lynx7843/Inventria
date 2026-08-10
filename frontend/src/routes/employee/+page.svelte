@@ -7,18 +7,29 @@
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { requireSession } from '$lib/auth';
+  import { fetchItems, type Item } from '$lib/inventory';
 
   // Gates the markup below. No role list: the stock movements on this page are
   // open to Admins as well, so this only requires that someone is signed in.
   let allowed = $state(false);
 
   // State variables for our data
-  let inventoryItems = $state([]);
+  let inventoryItems: Item[] = $state([]);
   let isLoading = $state(true);
   let errorMsg = $state('');
-  
+
+  // The four counters across the top. Zeros until the API answers, rather than
+  // the invented figures that used to sit here - a brand new warehouse really
+  // does have nothing in it, and saying so beats saying 12,482.
+  let stats = $state({
+    unitsOnHand: 0,
+    skusTracked: 0,
+    receivedToday: 0,
+    pickedToday: 0
+  });
+
   // Track which transaction form is visible
-  let activeTab = $state('receive'); 
+  let activeTab = $state('receive');
 
   // Fetch data as soon as the page loads
   onMount(async () => {
@@ -26,19 +37,23 @@
     allowed = true;
 
     try {
-      const response = await apiFetch('/api/inventory');
+      const [items, statsResponse] = await Promise.all([
+        fetchItems(),
+        apiFetch('/api/dashboard/employee')
+      ]);
 
-      if (response.status === 401) {
+      if (statsResponse.status === 401) {
         // Session is missing or expired, kick them back to login
         window.location.href = '/';
         return;
       }
 
-      if (!response.ok) {
-        throw new Error('Failed to load inventory data.');
+      if (!statsResponse.ok) {
+        throw new Error('Failed to load dashboard totals.');
       }
-      
-      inventoryItems = await response.json();
+
+      inventoryItems = items;
+      stats = await statsResponse.json();
     } catch (err) {
       errorMsg = err instanceof Error ? err.message : 'Unknown error occurred.';
     } finally {
@@ -49,7 +64,7 @@
 
 {#if allowed}
 <Sidebar activePage="Dashboard" />
-<Header userName="Alice Smith" role="Inventory Manager" />
+<Header />
 
 <main class="dashboard-content">
   <div class="page-header">
@@ -63,26 +78,29 @@
     </div>
   </div>
 
+  <!-- Every figure here is one the database can answer. The two that used to be
+       here and cannot be - a low-stock count, which needs a reorder level no
+       item carries, and an "efficiency rate", which was never defined as
+       anything - were removed rather than approximated. -->
   <div class="stats-grid">
     <div class="stat-card">
       <div class="icon-box">📦</div>
-      <p class="subtext">TOTAL ITEMS</p>
-      <div class="value">12,482</div>
+      <p class="subtext">UNITS ON HAND</p>
+      <div class="value">{stats.unitsOnHand.toLocaleString()}</div>
     </div>
     <div class="stat-card">
-      <div class="icon-box alert">⚠️</div>
-      <p class="subtext">LOW STOCK ALERTS</p>
-      <div class="value text-red">14</div>
+      <div class="icon-box">🏷️</div>
+      <p class="subtext">SKUS TRACKED</p>
+      <div class="value">{stats.skusTracked.toLocaleString()}</div>
     </div>
     <div class="stat-card">
       <div class="icon-box success">✔️</div>
-      <p class="subtext">ITEMS RECEIVED TODAY</p>
-      <div class="value">342</div>
+      <p class="subtext">RECEIVED TODAY</p>
+      <div class="value">{stats.receivedToday.toLocaleString()}</div>
     </div>
     <div class="stat-card efficiency">
-      <p class="subtext text-white">EFFICIENCY RATE</p>
-      <div class="value text-white">98.4%</div>
-      <div class="progress-bar"><div class="fill" style="width: 98.4%"></div></div>
+      <p class="subtext text-white">PICKED TODAY</p>
+      <div class="value text-white">{stats.pickedToday.toLocaleString()}</div>
     </div>
   </div>
 
@@ -157,8 +175,17 @@
               <td><strong>{item.name}</strong></td>
               <td>{item.sku}</td>
               <td>{item.category}</td>
-              <td>--</td> <!-- Quantity will be linked later via InventoryBalances -->
-              <td><span class="badge in-stock">ACTIVE</span></td>
+              <td>{item.quantityOnHand.toLocaleString()}</td>
+              <!-- The badge said ACTIVE for everything, which described the row
+                   rather than the stock. What a picker needs to know is whether
+                   there is any to pick. -->
+              <td>
+                {#if item.quantityOnHand > 0}
+                  <span class="badge in-stock">IN STOCK</span>
+                {:else}
+                  <span class="badge out-stock">OUT OF STOCK</span>
+                {/if}
+              </td>
             </tr>
           {/each}
         {/if}
@@ -180,15 +207,11 @@
   .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
   .stat-card { background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; position: relative; }
   .icon-box { position: absolute; top: 1.5rem; right: 1.5rem; background: #f1f5f9; padding: 0.5rem; border-radius: 8px; }
-  .icon-box.alert { background: #fee2e2; }
   .icon-box.success { background: #dcfce7; }
   .stat-card .subtext { font-size: 0.75rem; color: #64748b; letter-spacing: 0.5px; margin: 0 0 0.5rem 0; padding-top: 1rem; }
   .stat-card .value { font-size: 2.5rem; font-weight: 700; color: #0f172a; margin: 0; }
-  .text-red { color: #ef4444 !important; }
   .efficiency { background: #0b6b36; border-color: #0b6b36; }
   .text-white { color: white !important; }
-  .progress-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; margin-top: 1rem; }
-  .progress-bar .fill { height: 100%; background: white; }
 
   .transaction-controls { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }
   .tab-btn { background: none; border: none; padding: 0.5rem 1rem; font-weight: 600; color: #64748b; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
@@ -205,6 +228,5 @@
   
   .badge { padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
   .badge.in-stock { background: #dcfce7; color: #166534; }
-  .badge.low-stock { background: #fee2e2; color: #991b1b; }
   .badge.out-stock { background: #e2e8f0; color: #475569; }
 </style>

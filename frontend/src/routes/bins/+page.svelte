@@ -126,7 +126,7 @@
 
 {#if allowed}
 <Sidebar activePage="Bins" />
-<Header userName="Admin User" role="SYSTEM ROOT" />
+<Header />
 
 <main class="dashboard-content">
   <div class="page-header">
