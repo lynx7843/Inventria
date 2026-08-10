@@ -120,7 +120,7 @@
 
 {#if allowed}
 <Sidebar activePage="Users" />
-<Header userName="Admin User" role="SYSTEM ROOT" />
+<Header />
 
 <main class="dashboard-content">
   <div class="page-header">
