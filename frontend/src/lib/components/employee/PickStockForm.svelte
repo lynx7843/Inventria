@@ -134,7 +134,7 @@
     {/if}
 
     <div class="submit-row">
-      <Button type="submit" text="PROCESS PICK" {isLoading} />
+      <Button type="submit" text="PROCESS PICK" {isLoading} loadingText="PROCESSING PICK..." />
     </div>
   </form>
 </div>

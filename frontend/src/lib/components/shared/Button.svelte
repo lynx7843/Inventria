@@ -6,19 +6,26 @@
   // clean `npm run check`. Borrowing the attribute's own type means a typo like
   // type="sumbit" is a compile error rather than a button that silently stops
   // submitting the form it sits in.
+  // The busy label was hardcoded to "AUTHENTICATING...", which is true of
+  // exactly one button in the app - the one on the login form. Every other use
+  // of this component told the user it was authenticating while it received a
+  // pallet or moved stock between bins. It is a prop now, with a default that is
+  // at least true of whatever is happening.
   let {
     text,
     type = "button",
-    isLoading = false
+    isLoading = false,
+    loadingText = "WORKING..."
   }: {
     text: string;
     type?: HTMLButtonAttributes['type'];
     isLoading?: boolean;
+    loadingText?: string;
   } = $props();
 </script>
 
 <button {type} class="btn-solid" disabled={isLoading}>
-  {isLoading ? 'AUTHENTICATING...' : text}
+  {isLoading ? loadingText : text}
 </button>
 
 <style>

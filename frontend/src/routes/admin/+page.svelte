@@ -79,6 +79,32 @@
     }
   });
 
+  // The Export button used to do nothing. The accounts are already here, in
+  // memory, so exporting them is a file the browser can write by itself - no
+  // endpoint, no round trip. Only what the table shows: the API never sends a
+  // password hash, and there is nothing else on an account to leak.
+  function exportUsers() {
+    const rows = [
+      ['Id', 'Username', 'Role'],
+      ...users.map((user) => [String(user.id), user.username, user.role])
+    ];
+
+    // Anything holding a quote, comma or newline has to be quoted, with inner
+    // quotes doubled - a username is free text, so this is not hypothetical.
+    const csv = rows
+      .map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = `inventria-users-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
   // Helper function to format dates elegantly
   function formatTimeAgo(dateString: string) {
     const date = new Date(dateString);
@@ -160,14 +186,23 @@
           </li>
         {/each}
       </ul>
-      <button class="btn-outline">View All Logs</button>
+      <!-- There is no full log screen to open: the API returns the five entries
+           above and nothing else, so a working button would need a paged
+           endpoint and a page to show it on. Marked the way the sidebar marks
+           Reports and Settings rather than left looking clickable. -->
+      <span class="unbuilt">View All Logs<span class="tag">SOON</span></span>
     </div>
   </div>
 
   <div class="panel mt-1">
     <div class="panel-header">
       <h3>User Management</h3>
-      <div class="actions"><button class="btn-outline">Export</button><button class="btn-solid">+ Add New User</button></div>
+      <!-- Add New User goes to the screen that creates one, rather than being a
+           second, dead copy of it. -->
+      <div class="actions">
+        <button class="btn-outline" onclick={exportUsers} disabled={users.length === 0}>Export</button>
+        <a class="btn-solid" href="/users">+ Add New User</a>
+      </div>
     </div>
     <!-- Only the columns the API has answers for. Status and last-active went
          with the invented people: nothing records whether an account is on
@@ -225,7 +260,10 @@
   .mt-1 { margin-top: 1.5rem; }
   .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
   .btn-outline { background: white; border: 1px solid #cbd5e1; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; cursor: pointer; }
-  .btn-solid { background: #0b6b36; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; cursor: pointer; margin-left: 0.5rem; }
+  .btn-outline:disabled { color: #94a3b8; cursor: not-allowed; }
+  .btn-solid { background: #0b6b36; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; cursor: pointer; margin-left: 0.5rem; text-decoration: none; display: inline-block; }
+  .unbuilt { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 500; color: #94a3b8; }
+  .tag { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.5px; color: #94a3b8; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0.1rem 0.35rem; }
   
   .data-table { width: 100%; border-collapse: collapse; text-align: left; }
   .data-table th { padding: 1rem; border-bottom: 2px solid #e2e8f0; color: #64748b; font-size: 0.75rem; letter-spacing: 0.5px; }
