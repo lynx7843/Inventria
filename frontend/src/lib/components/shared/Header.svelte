@@ -8,6 +8,9 @@
   let {
     userName = getUsername() ?? 'Signed in',
     role = getRole() ?? ''
+  }: {
+    userName?: string;
+    role?: string;
   } = $props();
 </script>
 

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { HTMLInputAttributes } from 'svelte/elements';
+
   // Using Svelte 5 $bindable() so the parent can read what the user types
   // min/step apply to number inputs and are left off everything else: passing
   // undefined omits the attribute. They are what makes the browser refuse "2.5"
@@ -12,6 +14,15 @@
     required = false,
     min = undefined,
     step = undefined
+  }: {
+    id: string;
+    label: string;
+    type?: HTMLInputAttributes['type'];
+    placeholder?: string;
+    value: string;
+    required?: boolean;
+    min?: number;
+    step?: number;
   } = $props();
 </script>
 
