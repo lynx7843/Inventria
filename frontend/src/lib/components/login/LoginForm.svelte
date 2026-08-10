@@ -23,9 +23,14 @@
         body: JSON.stringify({ username, password })
       });
       
-      // If the backend returns a 401 Unauthorized, trigger the error
+      // A rejected sign-in is not always a wrong password: too many attempts on
+      // this account, or from this device, comes back as a 429 saying how long
+      // to wait. Hardcoding "Invalid username or password." here hid that and
+      // left the form telling people to retype a password that was already
+      // right. Fall back to it only when the API said nothing useful.
       if (!response.ok) {
-        throw new Error('Invalid username or password.');
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.message || 'Invalid username or password.');
       }
       
       // If successful, parse the response data

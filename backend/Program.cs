@@ -3,10 +3,13 @@ using Inventria.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -88,6 +91,55 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+
+// Throttle sign-in attempts.
+// The limiter below is per client address: it is what stops a script from
+// hammering the login endpoint, which matters beyond guessing because verifying
+// a password is deliberately expensive and an unauthenticated flood of them is a
+// way to spend the server's CPU. LoginThrottle is the other half, counting
+// failures per account so that guessing spread across many addresses still runs
+// out of attempts; both are needed, neither replaces the other.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<LoginThrottle>();
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter =
+                ((int)retryAfter.TotalSeconds).ToString(NumberFormatInfo.InvariantInfo);
+        }
+
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+
+        // { message: "..." } like every other error this API returns, because
+        // that is the one field the frontend knows how to show.
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { message = "Too many sign-in attempts from this device. Please wait a few minutes and try again." },
+            cancellationToken);
+    };
+
+    options.AddPolicy(LoginThrottle.RateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            // Behind a reverse proxy every request arrives from the proxy, so a
+            // deployment that terminates TLS elsewhere needs forwarded headers
+            // configured or this collapses into one shared bucket.
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                // Comfortably more than a shift's worth of sign-ins from one
+                // station, and far less than a guessing run needs.
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(5),
+                // Rejected rather than queued: a caller past the limit should be
+                // told to wait, not held on an open connection until it is let
+                // through, which is its own way to exhaust the server.
+                QueueLimit = 0
+            }));
+});
+
 builder.Services.AddControllers();
 
 // [ApiController] rejects a request whose DTO fails validation before the action
@@ -138,6 +190,12 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowSvelteFrontend");
+
+// After UseCors so a rejected request still comes back with the headers the
+// browser needs to let the page read it - a 429 the frontend cannot see is a
+// login form that looks broken. CORS also answers preflights before this point,
+// so an OPTIONS request never spends a caller's login budget.
+app.UseRateLimiter();
 
 // 4. Enable Authentication & Authorization (Must be in this exact order)
 app.UseAuthentication();
