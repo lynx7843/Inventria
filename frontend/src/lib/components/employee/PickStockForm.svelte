@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { apiFetch, apiErrorMessage } from '$lib/api';
   import { endExpiredSession } from '$lib/auth';
-  import { fetchBins, fetchItems, binLabel, itemLabel, type Option } from '$lib/inventory';
+  import { fetchBins, fetchItems, binLabel, itemLabel, parseUnits, type Option } from '$lib/inventory';
 
   let itemId = $state('');
   let warehouseBinId = $state('');
@@ -33,9 +33,24 @@
   });
 
   async function handlePickStock() {
-    isLoading = true;
     message = '';
     isError = false;
+
+    // See ReceiveStockForm: an empty dropdown is a disabled one, which the
+    // browser's required check skips.
+    const units = parseUnits(quantity);
+
+    if (!itemId || !warehouseBinId || units === null) {
+      isError = true;
+      message = !itemId
+        ? 'Choose an item to pick.'
+        : !warehouseBinId
+          ? 'Choose the bin to pick from.'
+          : 'Enter the number of units as a whole number greater than zero.';
+      return;
+    }
+
+    isLoading = true;
 
     try {
       const response = await apiFetch('/api/inventory/pick', {
@@ -47,7 +62,7 @@
         body: JSON.stringify({
           itemId: Number(itemId),
           warehouseBinId: Number(warehouseBinId),
-          quantity: Number(quantity)
+          quantity: units
         })
       });
 
@@ -103,7 +118,7 @@
         emptyLabel={isLoadingOptions ? 'Loading...' : 'No bins defined yet'}
         required={true}
       />
-      <InputField id="pick-quantity" type="number" label="QUANTITY" placeholder="Units to pick" bind:value={quantity} required={true} />
+      <InputField id="pick-quantity" type="number" label="QUANTITY" placeholder="Units to pick" bind:value={quantity} required={true} min={1} step={1} />
     </div>
 
     {#if !isLoadingOptions && binOptions.length === 0}

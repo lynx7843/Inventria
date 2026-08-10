@@ -3,6 +3,7 @@ using Inventria.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -152,14 +153,42 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.InvalidModelStateResponseFactory = context =>
     {
-        var message = context.ModelState.Values
-            .SelectMany(state => state.Errors)
-            .Select(error => error.ErrorMessage)
+        var message = context.ModelState
+            .SelectMany(entry => entry.Value?.Errors.Select(error => Describe(entry.Key, error)) ?? [])
             .FirstOrDefault(text => !string.IsNullOrWhiteSpace(text))
             ?? "The request was not valid.";
 
         return new BadRequestObjectResult(new { Message = message });
     };
+
+    // Not every entry in ModelState came from an attribute someone wrote a
+    // sentence for. A value the JSON reader could not turn into the declared
+    // type - "2.5" units, a null where an id belongs, a NaN, which JSON cannot
+    // even spell - never reaches those attributes: deserialization fails first
+    // and System.Text.Json contributes its own text, "The JSON value could not
+    // be converted to System.Int32. Path: $.quantity | LineNumber: 0 |
+    // BytePositionInLine: 42". That is true, and it is not something to show
+    // someone counting boxes. Worse, some of those entries carry an exception
+    // and an empty message, which fell through to "The request was not valid."
+    // and said nothing about which field was wrong. Naming the field is the
+    // least this can do.
+    static string Describe(string key, ModelError error)
+    {
+        var isFormatFailure = error.Exception is not null
+            || error.ErrorMessage.StartsWith("The JSON value could not be converted", StringComparison.Ordinal);
+
+        if (!isFormatFailure)
+        {
+            return error.ErrorMessage;
+        }
+
+        // The key for these is the JSON path, "$.quantity".
+        var field = key.TrimStart('$', '.');
+
+        return string.IsNullOrEmpty(field)
+            ? "The request contained a value in the wrong format."
+            : $"'{field}' was sent in the wrong format.";
+    }
 });
 
 // Backs the app.MapOpenApi() endpoint below; without it the document service

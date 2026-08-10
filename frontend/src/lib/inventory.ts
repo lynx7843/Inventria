@@ -38,6 +38,23 @@ export function itemLabel(item: Item): string {
 	return `${item.sku} — ${item.name}`;
 }
 
+/**
+ * The number of units a stock move should send, or null when the box does not
+ * hold one.
+ *
+ * `Number()` answers every wrong input with something that looks like a number
+ * and is not: an empty box and a null both come back as 0, letters come back as
+ * NaN, and "2.5" comes back as a quantity of goods that cannot exist. Sent on,
+ * those became "Item with ID 0 not found", a JSON conversion failure quoting a
+ * byte offset, or - for NaN, which JSON has no way to write - a null the API
+ * reads as a missing field. None of them mention the quantity box, which is
+ * where the mistake actually is.
+ */
+export function parseUnits(value: unknown): number | null {
+	const units = Number(value);
+	return Number.isInteger(units) && units > 0 ? units : null;
+}
+
 async function getJson<T>(path: string, what: string): Promise<T> {
 	const res = await apiFetch(path);
 
