@@ -37,6 +37,9 @@ public sealed class LoginThrottle
 
     private readonly IMemoryCache _cache;
 
+    // Held only while a username's counter is being created; see RecordFailure.
+    private readonly object _creationGate = new();
+
     public LoginThrottle(IMemoryCache cache)
     {
         _cache = cache;
@@ -76,16 +79,32 @@ public sealed class LoginThrottle
     /// <summary>Records a rejected sign-in attempt against this username.</summary>
     public void RecordFailure(string username)
     {
-        // Two simultaneous failures can both create an entry and one of the
-        // increments is then lost. That costs the attacker's budget an attempt
-        // it should have spent, which is not worth a lock on the login path.
-        var attempts = _cache.GetOrCreate(Key(username), entry =>
+        var key = Key(username);
+        Attempts attempts;
+
+        // GetOrCreate is not atomic: two failures arriving together can both
+        // find nothing, both build a counter, and the second one's write wins -
+        // so an attempt the attacker spent is not counted. Guessing in parallel
+        // would then buy more tries than the limit allows, which is the one
+        // thing this class exists to prevent, so creation is serialised. The
+        // lock covers only that; incrementing stays atomic on its own, and
+        // sign-ins do not arrive fast enough for either to be contended.
+        lock (_creationGate)
         {
-            // Absolute, not sliding: the window runs from the first failure, so
-            // continuing to guess cannot push the reset further away.
-            entry.AbsoluteExpirationRelativeToNow = Window;
-            return new Attempts { ResetsAt = DateTimeOffset.UtcNow + Window };
-        })!;
+            if (!_cache.TryGetValue(key, out Attempts? existing) || existing is null)
+            {
+                existing = new Attempts { ResetsAt = DateTimeOffset.UtcNow + Window };
+
+                // Absolute, not sliding: the window runs from the first failure,
+                // so continuing to guess cannot push the reset further away.
+                _cache.Set(key, existing, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = Window
+                });
+            }
+
+            attempts = existing;
+        }
 
         Interlocked.Increment(ref attempts.Failures);
     }
