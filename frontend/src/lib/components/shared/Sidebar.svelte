@@ -1,11 +1,18 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { apiFetch } from '$lib/api';
-  import { clearSession } from '$lib/auth';
+  import { clearSession, getRole, homeFor } from '$lib/auth';
 
   let {
     activePage = "Dashboard"
   } = $props();
+
+  // Employees and Admins have different dashboards, and only an Admin has a
+  // Users page to reach - the guard on it would bounce anyone else straight
+  // back, so don't offer the trip.
+  const role = getRole();
+  const dashboardHref = role ? homeFor(role) : '/';
+  const isAdmin = role === 'Admin';
 
   // The session cookie is HttpOnly, so only the server can clear it - navigating
   // away would otherwise leave a valid session behind for the rest of its life.
@@ -33,11 +40,17 @@
     </div>
   </div>
 
+  <!-- The links that have a page behind them navigate to it; the rest are still
+       placeholders for screens that do not exist yet. Bins is one of the real
+       ones: nothing can be received until a bin has been created there. -->
   <nav class="nav-links">
-    <a href="#" class:active={activePage === "Dashboard"}>Dashboard</a>
-    <a href="#" class:active={activePage === "Inventory"}>Inventory</a>
+    <a href={dashboardHref} class:active={activePage === "Dashboard"}>Dashboard</a>
+    <a href="/inventory" class:active={activePage === "Inventory"}>Inventory</a>
+    <a href="/bins" class:active={activePage === "Bins"}>Bins</a>
     <a href="#" class:active={activePage === "Reports"}>Reports</a>
-    <a href="#" class:active={activePage === "Users"}>Users</a>
+    {#if isAdmin}
+      <a href="/users" class:active={activePage === "Users"}>Users</a>
+    {/if}
     <a href="#" class:active={activePage === "Settings"}>Settings</a>
   </nav>
 

@@ -37,6 +37,14 @@ public class InventriaDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(b => b.ItemId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Same story for the bin the stock sits in: retiring a location is a
+            // decision about the warehouse map, not permission to make the goods
+            // on that shelf disappear from the books.
+            balance.HasOne(b => b.WarehouseBin)
+                .WithMany()
+                .HasForeignKey(b => b.WarehouseBinId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // StockMovements had no foreign key at all, so a deleted item left its
@@ -46,11 +54,22 @@ public class InventriaDbContext : DbContext
         // relationship exists to refuse the delete rather than to follow it. No
         // navigation property: a movement is written and read as a flat row, and
         // the only thing needed here is the constraint.
-        modelBuilder.Entity<StockMovement>()
-            .HasOne<Item>()
-            .WithMany()
-            .HasForeignKey(m => m.ItemId)
-            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<StockMovement>(movement =>
+        {
+            movement.HasOne<Item>()
+                .WithMany()
+                .HasForeignKey(m => m.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The bin is half of what a movement says - "20 units left A-1-1" is
+            // the whole record - so a deleted bin would leave the log saying
+            // units left somewhere unnamed. Nullable, because the column is:
+            // the constraint only applies to rows that name a bin.
+            movement.HasOne<WarehouseBin>()
+                .WithMany()
+                .HasForeignKey(m => m.WarehouseBinId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Usernames identify an account to log in as, so two of them is an
         // authentication bug, not just untidy data. The Any() check in
@@ -71,6 +90,19 @@ public class InventriaDbContext : DbContext
         {
             item.Property(i => i.Sku).HasMaxLength(64);
             item.HasIndex(i => i.Sku).IsUnique();
+        });
+
+        // Zone/Aisle/Shelf together are the address a picker walks to, so two
+        // rows with the same three values are two Ids for one physical shelf -
+        // stock received into one of them is invisible to anyone looking at the
+        // other. Same nvarchar(max) constraint as above; the lengths are what a
+        // location code plausibly needs rather than a guess at a storage limit.
+        modelBuilder.Entity<WarehouseBin>(bin =>
+        {
+            bin.Property(b => b.Zone).HasMaxLength(64);
+            bin.Property(b => b.Aisle).HasMaxLength(32);
+            bin.Property(b => b.Shelf).HasMaxLength(32);
+            bin.HasIndex(b => new { b.Zone, b.Aisle, b.Shelf }).IsUnique();
         });
     }
 }
