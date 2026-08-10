@@ -1,18 +1,23 @@
 <script lang="ts">
   // Using Svelte 5 $bindable() so the parent can read what the user types
-  let { 
-    id, 
-    label, 
-    type = "text", 
-    placeholder = "", 
-    value = $bindable(), 
-    required = false 
+  // min/step apply to number inputs and are left off everything else: passing
+  // undefined omits the attribute. They are what makes the browser refuse "2.5"
+  // or "-4" in a quantity box, before any of it becomes a request.
+  let {
+    id,
+    label,
+    type = "text",
+    placeholder = "",
+    value = $bindable(),
+    required = false,
+    min = undefined,
+    step = undefined
   } = $props();
 </script>
 
 <div class="input-group">
   <label for={id}>{label}</label>
-  <input {type} {id} bind:value {placeholder} {required} />
+  <input {type} {id} bind:value {placeholder} {required} {min} {step} />
 </div>
 
 <style>

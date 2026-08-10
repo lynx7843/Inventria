@@ -416,24 +416,47 @@ public class ItemRequest
 
 // None of these carry a PerformedBy: attribution comes from the caller's token,
 // so there is deliberately no field for a client to set it with.
+//
+// The ranges below run before the action does, so a request that names nothing
+// is answered with what to choose rather than with the result of looking it up:
+// a missing id arrives as 0, and "Item with ID 0 not found" describes a search
+// for a row nobody asked for. Ids are also the fields most likely to arrive as 0
+// by accident - an unselected dropdown, a field a script forgot to fill.
 public class ReceiveStockRequest
 {
+    [Range(1, int.MaxValue, ErrorMessage = "Choose an item to receive.")]
     public int ItemId { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Choose the bin the stock is going into.")]
     public int WarehouseBinId { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Quantity must be a whole number greater than zero.")]
     public int Quantity { get; set; }
 }
 
 public class PickStockRequest
 {
+    [Range(1, int.MaxValue, ErrorMessage = "Choose an item to pick.")]
     public int ItemId { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Choose the bin to pick from.")]
     public int WarehouseBinId { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Quantity must be a whole number greater than zero.")]
     public int Quantity { get; set; }
 }
 
 public class RelocateStockRequest
 {
+    [Range(1, int.MaxValue, ErrorMessage = "Choose an item to move.")]
     public int ItemId { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Choose the bin the stock is coming from.")]
     public int SourceBinId { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Choose the bin the stock is going to.")]
     public int DestinationBinId { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Quantity must be a whole number greater than zero.")]
     public int Quantity { get; set; }
 }

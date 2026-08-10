@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { apiFetch, apiErrorMessage } from '$lib/api';
   import { endExpiredSession } from '$lib/auth';
-  import { fetchBins, fetchItems, binLabel, itemLabel, type Option } from '$lib/inventory';
+  import { fetchBins, fetchItems, binLabel, itemLabel, parseUnits, type Option } from '$lib/inventory';
 
   let itemId = $state('');
   let sourceBinId = $state('');
@@ -46,9 +46,26 @@
   });
 
   async function handleRelocateStock() {
-    isLoading = true;
     message = '';
     isError = false;
+
+    // See ReceiveStockForm: an empty dropdown is a disabled one, which the
+    // browser's required check skips.
+    const units = parseUnits(quantity);
+
+    if (!itemId || !sourceBinId || !destBinId || units === null) {
+      isError = true;
+      message = !itemId
+        ? 'Choose an item to move.'
+        : !sourceBinId
+          ? 'Choose the bin the stock is coming from.'
+          : !destBinId
+            ? 'Choose the bin the stock is going to.'
+            : 'Enter the number of units as a whole number greater than zero.';
+      return;
+    }
+
+    isLoading = true;
 
     try {
       const response = await apiFetch('/api/inventory/relocate', {
@@ -61,7 +78,7 @@
           itemId: Number(itemId),
           sourceBinId: Number(sourceBinId),
           destinationBinId: Number(destBinId),
-          quantity: Number(quantity)
+          quantity: units
         })
       });
 
@@ -127,7 +144,7 @@
         emptyLabel={isLoadingOptions ? 'Loading...' : 'No other bin available'}
         required={true}
       />
-      <InputField id="rel-qty" type="number" label="QUANTITY" placeholder="Units to move" bind:value={quantity} required={true} />
+      <InputField id="rel-qty" type="number" label="QUANTITY" placeholder="Units to move" bind:value={quantity} required={true} min={1} step={1} />
     </div>
 
     {#if needsMoreBins}

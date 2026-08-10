@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { apiFetch, apiErrorMessage } from '$lib/api';
   import { endExpiredSession } from '$lib/auth';
-  import { fetchBins, fetchItems, binLabel, itemLabel, type Option } from '$lib/inventory';
+  import { fetchBins, fetchItems, binLabel, itemLabel, parseUnits, type Option } from '$lib/inventory';
 
   // State variables for the form inputs. The two ids are chosen from what the
   // database actually holds rather than typed: a raw number is something the
@@ -39,9 +39,26 @@
   });
 
   async function handleReceiveStock() {
-    isLoading = true;
     message = '';
     isError = false;
+
+    // Checked here rather than left to the API. A dropdown with nothing in it is
+    // rendered disabled, and a disabled control is exempt from the browser's
+    // required-field check, so "no bins exist yet" could still be submitted -
+    // as bin 0, which comes back as a complaint about an id nobody chose.
+    const units = parseUnits(quantity);
+
+    if (!itemId || !warehouseBinId || units === null) {
+      isError = true;
+      message = !itemId
+        ? 'Choose an item to receive.'
+        : !warehouseBinId
+          ? 'Choose the bin the stock is going into.'
+          : 'Enter the number of units as a whole number greater than zero.';
+      return;
+    }
+
+    isLoading = true;
 
     try {
       const response = await apiFetch('/api/inventory/receive', {
@@ -54,7 +71,7 @@
         body: JSON.stringify({
           itemId: Number(itemId),
           warehouseBinId: Number(warehouseBinId),
-          quantity: Number(quantity)
+          quantity: units
         })
       });
 
@@ -119,6 +136,8 @@
         placeholder="Units received"
         bind:value={quantity}
         required={true}
+        min={1}
+        step={1}
       />
     </div>
 

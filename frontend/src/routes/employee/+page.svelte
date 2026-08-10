@@ -109,19 +109,19 @@
     <button
       class="tab-btn"
       class:active={activeTab === 'receive'}
-      on:click={() => activeTab = 'receive'}>
+      onclick={() => activeTab = 'receive'}>
       ↓ Receive Stock
     </button>
     <button
       class="tab-btn"
       class:active={activeTab === 'pick'}
-      on:click={() => activeTab = 'pick'}>
+      onclick={() => activeTab = 'pick'}>
       ↑ Pick Order
     </button>
     <button
       class="tab-btn"
       class:active={activeTab === 'relocate'}
-      on:click={() => activeTab = 'relocate'}>
+      onclick={() => activeTab = 'relocate'}>
       ⇄ Relocate
     </button>
   </div>
