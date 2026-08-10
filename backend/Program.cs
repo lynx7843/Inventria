@@ -242,15 +242,54 @@ static void SeedFirstAdmin(WebApplication app)
     var db = services.GetRequiredService<InventriaDbContext>();
 
     // Don't take the app down at startup just because SQL Server isn't up yet
-    // or migrations haven't been applied.
-    if (!db.Database.CanConnect())
+    // or migrations haven't been applied. The comment said that before this
+    // method could actually do it: CanConnect answers "the server replied and
+    // the database is there", which is true of a database created but never
+    // migrated, and the next line then asked a table that does not exist for its
+    // rows. That threw out of Main, so a fresh database - the exact case the
+    // seed exists for - stopped the app from starting at all.
+    try
     {
-        logger.LogWarning("Skipping admin seed: cannot connect to the database.");
-        return;
+        if (!db.Database.CanConnect())
+        {
+            logger.LogWarning("Skipping admin seed: cannot connect to the database.");
+            return;
+        }
+
+        // The tables are what the seed needs, and only migrations create them.
+        // Applying them here instead would mean every start of the app rewriting
+        // the schema it finds, which is a decision about deployments and not one
+        // to make quietly inside a seeding helper.
+        var pending = db.Database.GetPendingMigrations().ToList();
+
+        if (pending.Count > 0)
+        {
+            logger.LogWarning(
+                "Skipping admin seed: {Count} migration(s) have not been applied, so the tables it needs do not exist yet. " +
+                "Run 'dotnet ef database update' and restart. Pending: {Pending}",
+                pending.Count, string.Join(", ", pending));
+            return;
+        }
+
+        if (db.Users.Any()) return;
+
+        SeedAdminUser(app, db, logger);
     }
+    catch (Exception ex)
+    {
+        // Anything else the database does on the way up - a login that lacks
+        // rights, a timeout, a half-applied schema - is worth a line in the log
+        // and is not worth refusing to start over. Without an account the API
+        // answers 401 and says so, which is a better failure than a process that
+        // exits before it can explain itself.
+        logger.LogWarning(ex, "Skipping admin seed: the database could not be prepared.");
+    }
+}
 
-    if (db.Users.Any()) return;
-
+// Writing the account itself, once the checks above have established there is a
+// schema to write it into and nobody to sign in as.
+static void SeedAdminUser(WebApplication app, InventriaDbContext db, ILogger logger)
+{
     var username = app.Configuration["Seed:AdminUsername"] ?? "admin";
     var password = app.Configuration["Seed:AdminPassword"];
     var generated = false;
