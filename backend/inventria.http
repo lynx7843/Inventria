@@ -1,6 +1,176 @@
+### Inventria API
+#
+# Every request below is one this API actually serves. Run them top to bottom the
+# first time: nothing can be received until an item and a bin exist, and nothing
+# at all works until you have signed in.
+#
+# AUTHENTICATION
+# A successful login returns the JWT as an HttpOnly cookie rather than in the
+# body, so there is no token here to copy into a variable. Both the VS Code REST
+# Client and Visual Studio's .http editor keep cookies for the host and attach
+# them to later requests, so signing in once is enough. If your client does not,
+# send the token yourself with an `Authorization: Bearer <token>` header - the
+# API prefers that header when it is present, which is what keeps curl working.
+#
+# The `https` launch profile also listens on https://localhost:7149.
+
 @inventria_HostAddress = http://localhost:5240
 
-GET {{inventria_HostAddress}}/weatherforecast/
+### Sign in. Seeded admin username is `admin` unless Seed:AdminUsername says
+### otherwise; the password is printed once in the startup log when generated.
+### Ten wrong passwords in 15 minutes locks the account, and 20 attempts in 5
+### minutes from one address is answered with 429 whatever they are.
+POST {{inventria_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "change-me"
+}
+
+### ---------------------------------------------------------------- MASTER ITEMS
+
+### Every item, each with the units on hand summed across the bins holding it.
+GET {{inventria_HostAddress}}/api/inventory
 Accept: application/json
+
+### Create an item. SKUs are unique and compared after trimming.
+POST {{inventria_HostAddress}}/api/inventory/items
+Content-Type: application/json
+
+{
+  "sku": "SKU-100",
+  "name": "Steel Wrench",
+  "category": "Tools"
+}
+
+### Update an item. Replace 1 with the id the create returned.
+PUT {{inventria_HostAddress}}/api/inventory/items/1
+Content-Type: application/json
+
+{
+  "sku": "SKU-100",
+  "name": "Steel Wrench (15mm)",
+  "category": "Tools"
+}
+
+### Delete an item. Refused with 409 while stock or movement history references
+### it - the foreign keys enforce that, the message explains which one is in the way.
+DELETE {{inventria_HostAddress}}/api/inventory/items/1
+
+### -------------------------------------------------------------- WAREHOUSE BINS
+
+### Every bin, ordered as a walk through the warehouse.
+GET {{inventria_HostAddress}}/api/warehousebins
+Accept: application/json
+
+### Create a bin. Zone/Aisle/Shelf together must be unique: two rows with the
+### same address are two ids for one physical shelf.
+POST {{inventria_HostAddress}}/api/warehousebins
+Content-Type: application/json
+
+{
+  "zone": "Electronics",
+  "aisle": "A1",
+  "shelf": "S3"
+}
+
+### Update a bin.
+PUT {{inventria_HostAddress}}/api/warehousebins/1
+Content-Type: application/json
+
+{
+  "zone": "Electronics",
+  "aisle": "A1",
+  "shelf": "S4"
+}
+
+### Delete a bin. Refused while it holds stock or has movements against it.
+DELETE {{inventria_HostAddress}}/api/warehousebins/1
+
+### ------------------------------------------------------------- STOCK MOVEMENTS
+#
+# None of these carry a `performedBy`: the API stamps movements with the username
+# from the session token, so there is deliberately no field to set it with.
+# Quantities must be whole numbers greater than zero.
+
+### Receive stock into a bin.
+POST {{inventria_HostAddress}}/api/inventory/receive
+Content-Type: application/json
+
+{
+  "itemId": 1,
+  "warehouseBinId": 1,
+  "quantity": 25
+}
+
+### Pick stock out of a bin. 400 when the bin does not hold that many.
+POST {{inventria_HostAddress}}/api/inventory/pick
+Content-Type: application/json
+
+{
+  "itemId": 1,
+  "warehouseBinId": 1,
+  "quantity": 5
+}
+
+### Move stock between bins. Writes both legs of the move to the ledger, so a
+### bin's movements still add up to its balance.
+POST {{inventria_HostAddress}}/api/inventory/relocate
+Content-Type: application/json
+
+{
+  "itemId": 1,
+  "sourceBinId": 1,
+  "destinationBinId": 2,
+  "quantity": 10
+}
+
+### ------------------------------------------------------------------ DASHBOARDS
+
+### Admin only: totals, category split and the last five movements.
+GET {{inventria_HostAddress}}/api/dashboard/admin
+Accept: application/json
+
+### Any signed-in user: units on hand, SKUs tracked, and today's receipts and picks.
+GET {{inventria_HostAddress}}/api/dashboard/employee
+Accept: application/json
+
+### ----------------------------------------------------------------------- USERS
+#
+# Admin only, all four. There is no public registration endpoint: one would let
+# any caller pick their own role. The first Admin is seeded at startup.
+
+### List accounts. Password hashes are never returned.
+GET {{inventria_HostAddress}}/api/users
+Accept: application/json
+
+### Create an account. Role must be exactly "Admin" or "Employee".
+POST {{inventria_HostAddress}}/api/users
+Content-Type: application/json
+
+{
+  "username": "emp_105",
+  "password": "correct horse battery staple",
+  "role": "Employee"
+}
+
+### Update an account. An empty password means "leave the current one alone".
+PUT {{inventria_HostAddress}}/api/users/2
+Content-Type: application/json
+
+{
+  "username": "emp_105",
+  "password": "",
+  "role": "Admin"
+}
+
+### Delete an account.
+DELETE {{inventria_HostAddress}}/api/users/2
+
+### ---------------------------------------------------------------------- LOGOUT
+
+### Clears the session cookie. Anonymous, so an expired session can still tidy up.
+POST {{inventria_HostAddress}}/api/auth/logout
 
 ###
