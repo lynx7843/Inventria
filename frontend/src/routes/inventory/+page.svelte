@@ -44,6 +44,14 @@
   onMount(() => {
     if (!requireSession()) return;
     allowed = true;
+
+    // The sidebar's "+ New Entry" links here with ?new=1, meaning "I already
+    // said I want to create something" - so open the form rather than making
+    // them say it twice.
+    if (new URLSearchParams(window.location.search).has('new')) {
+      openNewForm();
+    }
+
     loadItems();
   });
 
