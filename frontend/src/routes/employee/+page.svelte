@@ -5,8 +5,8 @@
   import PickStockForm from '$lib/components/employee/PickStockForm.svelte';
   import RelocateStockForm from '$lib/components/employee/RelocateStockForm.svelte';
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
-  import { requireSession } from '$lib/auth';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
+  import { endExpiredSession, requireSession } from '$lib/auth';
   import { fetchItems, type Item } from '$lib/inventory';
 
   // Gates the markup below. No role list: the stock movements on this page are
@@ -44,12 +44,12 @@
 
       if (statsResponse.status === 401) {
         // Session is missing or expired, kick them back to login
-        window.location.href = '/';
+        endExpiredSession();
         return;
       }
 
       if (!statsResponse.ok) {
-        throw new Error('Failed to load dashboard totals.');
+        throw new Error(await apiErrorMessage(statsResponse, 'Failed to load dashboard totals.'));
       }
 
       inventoryItems = items;

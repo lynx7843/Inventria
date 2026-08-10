@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
-  import { apiFetch } from '$lib/api';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
   import { saveSession, homeFor } from '$lib/auth';
 
   // Svelte 5 state variables
@@ -29,8 +29,7 @@
       // left the form telling people to retype a password that was already
       // right. Fall back to it only when the API said nothing useful.
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.message || 'Invalid username or password.');
+        throw new Error(await apiErrorMessage(response, 'Invalid username or password.'));
       }
       
       // If successful, parse the response data

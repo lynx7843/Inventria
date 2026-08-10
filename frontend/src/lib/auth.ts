@@ -32,6 +32,21 @@ export function clearSession(): void {
 	localStorage.removeItem(ROLE_KEY);
 }
 
+/**
+ * Sends someone whose session has ended back to the login screen.
+ *
+ * Call this on any 401. The stored username and role have to go with it: they
+ * are what `requireSession` reads, so leaving them behind means the guard waves
+ * the visitor straight back onto a page whose every request now fails.
+ *
+ * A full page load rather than `goto`, because everything the old session put on
+ * screen should go with it.
+ */
+export function endExpiredSession(): void {
+	clearSession();
+	window.location.href = '/';
+}
+
 /** Where a role lands after signing in, and where it gets sent back to. */
 export function homeFor(role: Role): string {
 	return role === 'Admin' ? '/admin' : '/employee';

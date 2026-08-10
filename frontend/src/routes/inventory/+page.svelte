@@ -4,21 +4,22 @@
   import InputField from '$lib/components/shared/InputField.svelte';
   import Button from '$lib/components/shared/Button.svelte';
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
-  import { requireSession } from '$lib/auth';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
+  import { endExpiredSession, requireSession } from '$lib/auth';
+  import type { Item } from '$lib/inventory';
 
   // Gates the markup below. No role list: Admins and Employees both manage
   // inventory, so this only requires that someone is signed in.
   let allowed = $state(false);
 
-  let items = $state([]);
+  let items: Item[] = $state([]);
   let isLoading = $state(true);
   let errorMsg = $state('');
 
   // Form State
   let showForm = $state(false);
   let isEditing = $state(false);
-  let editingId = $state(null);
+  let editingId: number | null = $state(null);
   
   let sku = $state('');
   let name = $state('');
@@ -29,13 +30,27 @@
     isLoading = true;
     try {
       const res = await apiFetch('/api/inventory');
-      
-      if (res.ok) items = await res.json();
-      else if (res.status === 401) {
-        window.location.href = '/';
+
+      if (res.ok) {
+        items = await res.json();
+        return;
       }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      // Anything else used to be swallowed: the table stayed empty and said "No
+      // items found", which is a claim about the warehouse rather than an
+      // admission that the request failed. Someone looking at that would
+      // reasonably conclude their stock had vanished.
+      errorMsg = await apiErrorMessage(res, 'Failed to load items.');
     } catch (err) {
+      // The request never completed - the API is down, or the browser is
+      // offline. This is the only case that is genuinely a network error.
       console.error(err);
+      errorMsg = 'A network error occurred while loading items.';
     } finally {
       isLoading = false;
     }
@@ -75,20 +90,29 @@
       if (res.ok) {
         closeForm();
         await loadItems(); // Refresh the table
-      } else {
-        // Blank fields, an over-long value or a SKU another item already uses.
-        // The server says which; dropping the response left the form looking
-        // like it had simply ignored the click.
-        const data = await res.json();
-        errorMsg = data.message || 'Failed to save item.';
+        return;
       }
+
+      // A session that expired while the form was open. Reading this as a
+      // message would find no body to read and report the expiry as a network
+      // failure, leaving them retyping a SKU that was never going to save.
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      // Blank fields, an over-long value or a SKU another item already uses.
+      // The server says which; dropping the response left the form looking
+      // like it had simply ignored the click.
+      errorMsg = await apiErrorMessage(res, 'Failed to save item.');
     } catch (err) {
+      console.error(err);
       errorMsg = 'A network error occurred while saving.';
     }
   }
 
   // 3. Delete Item
-  async function deleteItem(id) {
+  async function deleteItem(id: number) {
     if (!confirm('Are you sure you want to delete this item?')) return;
 
     errorMsg = '';
@@ -99,13 +123,19 @@
       });
       if (res.ok) {
         await loadItems();
-      } else {
-        // The server refuses to delete an item that still holds stock or has
-        // movement history. Silently doing nothing looked like a broken button.
-        const data = await res.json();
-        errorMsg = data.message || 'Failed to delete item.';
+        return;
       }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      // The server refuses to delete an item that still holds stock or has
+      // movement history. Silently doing nothing looked like a broken button.
+      errorMsg = await apiErrorMessage(res, 'Failed to delete item.');
     } catch (err) {
+      console.error(err);
       errorMsg = 'A network error occurred while deleting.';
     }
   }
@@ -121,7 +151,7 @@
     showForm = true;
   }
 
-  function openEditForm(item) {
+  function openEditForm(item: Item) {
     isEditing = true;
     editingId = item.id;
     sku = item.sku;
