@@ -68,9 +68,12 @@
     required={true} 
   />
 
+  <!-- "Forgot?" was a link to nowhere. There is no reset flow to send anyone to
+       - an Admin sets a new password from the Users screen - so this says that
+       instead of offering a click that does nothing. -->
   <div class="password-header">
     <label for="password">PASSWORD</label>
-    <a href="#" class="forgot">Forgot?</a>
+    <span class="forgot">Forgotten? Ask an administrator to reset it</span>
   </div>
   <InputField 
     id="password" 
@@ -81,23 +84,22 @@
     required={true} 
   />
 
-  <div class="checkbox-group">
-    <input type="checkbox" id="remember" />
-    <label for="remember">Remember this station</label>
-  </div>
+  <!-- "Remember this station" is gone rather than wired up. Nothing was reading
+       it, and what it promises - a session that outlives the browser being
+       closed - is a decision about how long a warehouse terminal stays signed
+       in, which belongs to whoever sets the token's eight-hour lifetime, not to
+       a checkbox on a shared machine. -->
 
   {#if errorMsg}
     <p class="error">{errorMsg}</p>
   {/if}
 
-  <Button type="submit" text="SIGN IN TO DASHBOARD →" {isLoading} />
+  <Button type="submit" text="SIGN IN TO DASHBOARD →" {isLoading} loadingText="AUTHENTICATING..." />
 </form>
 
 <style>
   .password-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
   .password-header label { font-size: 0.75rem; font-weight: 600; color: #475569; letter-spacing: 0.5px; }
-  .forgot { font-size: 0.75rem; color: #0b6b36; text-decoration: none; }
-  .checkbox-group { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2rem; margin-top: -0.5rem; }
-  .checkbox-group label { margin: 0; font-weight: normal; font-size: 0.85rem; color: #475569; }
+  .forgot { font-size: 0.75rem; color: #94a3b8; }
   .error { color: #ef4444; font-size: 0.85rem; margin-top: -1rem; margin-bottom: 1rem; text-align: center; }
 </style>

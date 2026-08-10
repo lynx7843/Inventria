@@ -72,10 +72,10 @@
       <h2>Employee Dashboard</h2>
       <p>Welcome back. Here's what's happening in the warehouse today.</p>
     </div>
-    <div class="actions">
-      <button class="btn-outline">Scan Item</button>
-      <button class="btn-solid">Update Stock</button>
-    </div>
+    <!-- "Scan Item" and "Update Stock" did nothing. Scanning needs hardware and
+         a barcode field that do not exist; updating stock is what the three
+         tabs below this actually do, so a button that promised the same thing
+         and delivered nothing was worse than no button. -->
   </div>
 
   <!-- Every figure here is one the database can answer. The two that used to be
@@ -201,8 +201,6 @@
   .page-header h2 { margin: 0 0 0.25rem 0; color: #0f172a; }
   .page-header p { margin: 0; color: #64748b; }
   
-  .btn-outline { background: #dcfce7; color: #166534; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; cursor: pointer; }
-  .btn-solid { background: #0b6b36; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; cursor: pointer; margin-left: 0.5rem; }
 
   .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
   .stat-card { background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; position: relative; }

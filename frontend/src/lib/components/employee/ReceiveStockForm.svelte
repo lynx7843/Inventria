@@ -160,7 +160,7 @@
     {/if}
 
     <div class="submit-row">
-      <Button type="submit" text="PROCESS ARRIVAL" {isLoading} />
+      <Button type="submit" text="PROCESS ARRIVAL" {isLoading} loadingText="RECEIVING STOCK..." />
     </div>
   </form>
 </div>
