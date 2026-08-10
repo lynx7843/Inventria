@@ -56,6 +56,24 @@ public class InventriaDbContext : DbContext
         // the only thing needed here is the constraint.
         modelBuilder.Entity<StockMovement>(movement =>
         {
+            // Every movement is stamped with DateTime.UtcNow, but datetime2 has
+            // no room for that fact: the value comes back with Kind=Unspecified,
+            // serializes as "2026-08-10T09:42:00" with no trailing Z, and
+            // JavaScript's Date() reads a string without a zone as local time.
+            // The audit log then shifted by the viewer's UTC offset - a receive
+            // logged at 09:42 UTC read as 09:42 in Manila, seven hours early, and
+            // the error was invisible to anyone sitting in UTC.
+            //
+            // Stamping the Kind here rather than at each endpoint means the value
+            // is right everywhere it is read, including wherever the log is
+            // surfaced next. The write side only has to correct a Local time;
+            // Unspecified is assumed to already be UTC, because everything that
+            // writes this column writes UtcNow.
+            movement.Property(m => m.Timestamp)
+                .HasConversion(
+                    write => write.Kind == DateTimeKind.Local ? write.ToUniversalTime() : write,
+                    read => DateTime.SpecifyKind(read, DateTimeKind.Utc));
+
             movement.HasOne<Item>()
                 .WithMany()
                 .HasForeignKey(m => m.ItemId)
