@@ -153,13 +153,31 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.InvalidModelStateResponseFactory = context =>
     {
-        var message = context.ModelState
-            .SelectMany(entry => entry.Value?.Errors.Select(error => Describe(entry.Key, error)) ?? [])
+        var complaints = context.ModelState
+            .SelectMany(entry => entry.Value?.Errors.Select(error => (entry.Key, Error: error)) ?? [])
+            .ToList();
+
+        // A body the JSON reader could not read produces two complaints, not
+        // one: the specific failure naming the field it choked on, and a second
+        // saying the parameter that body was meant to bind to is missing. The
+        // second is the first with the useful half removed - taking whichever
+        // came first answered a fractional quantity with "The request field is
+        // required.", which names nothing the caller can act on. Sorting is
+        // stable, so within a rank the original order still decides.
+        var message = complaints
+            .OrderByDescending(complaint => IsFormatFailure(complaint.Error) || complaint.Key.StartsWith('$') ? 1 : 0)
+            .Select(complaint => Describe(complaint.Key, complaint.Error))
             .FirstOrDefault(text => !string.IsNullOrWhiteSpace(text))
             ?? "The request was not valid.";
 
         return new BadRequestObjectResult(new { Message = message });
     };
+
+    // A value that could not be read as the type the DTO declares, as opposed to
+    // one that was read and then failed a rule someone wrote a sentence for.
+    static bool IsFormatFailure(ModelError error) =>
+        error.Exception is not null
+        || error.ErrorMessage.StartsWith("The JSON value could not be converted", StringComparison.Ordinal);
 
     // Not every entry in ModelState came from an attribute someone wrote a
     // sentence for. A value the JSON reader could not turn into the declared
@@ -174,10 +192,7 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     // least this can do.
     static string Describe(string key, ModelError error)
     {
-        var isFormatFailure = error.Exception is not null
-            || error.ErrorMessage.StartsWith("The JSON value could not be converted", StringComparison.Ordinal);
-
-        if (!isFormatFailure)
+        if (!IsFormatFailure(error))
         {
             return error.ErrorMessage;
         }

@@ -26,10 +26,16 @@ public class InventoryController : ControllerBase
     private string CurrentUsername => User.FindFirstValue(ClaimTypes.Name)!;
 
     // How many times a stock move re-runs after losing a race. Conflicts only
-    // happen when two requests touch the same item/bin at the same moment, so a
-    // handful of attempts is plenty; past that the bin is hot enough that the
-    // caller should be told to try again rather than kept waiting.
-    private const int MaxConcurrencyAttempts = 4;
+    // happen when two requests touch the same item/bin at the same moment; past
+    // this many losses the bin is hot enough that the caller should be told to
+    // try again rather than kept waiting.
+    //
+    // Four was not enough in practice. Eight scanners receiving into one bin at
+    // once had two of them give up and answer 409 - not a lost unit, the ledger
+    // stayed exact, but a person told to do their job again for no reason they
+    // can see. The losers of each round all retried on the same instant and
+    // collided again, so the pause below matters more than the count does.
+    private const int MaxConcurrencyAttempts = 8;
 
     // Runs a stock move that reads balances and then saves them, retrying from
     // scratch if another request changed the same rows in between.
@@ -52,6 +58,7 @@ public class InventoryController : ControllerBase
                 // A balance row we read has been updated since; its RowVersion no
                 // longer matches and the UPDATE matched no rows.
                 _context.ChangeTracker.Clear();
+                PauseBeforeRetrying(attempt);
             }
             catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
             {
@@ -60,11 +67,21 @@ public class InventoryController : ControllerBase
                 // a unique index covers, so this is always that race and is always
                 // safe to retry - the retry will find their row.
                 _context.ChangeTracker.Clear();
+                PauseBeforeRetrying(attempt);
             }
         }
 
         return Conflict(new { Message = "This stock is being updated by another request. Please try again." });
     }
+
+    // Everyone who lost the same round is holding the same stale read and is
+    // ready to retry at the same moment, so retrying immediately reproduces the
+    // pile-up that caused the loss. Waiting a random few milliseconds, growing
+    // with each attempt, is what breaks the tie - without it, extra attempts
+    // mostly buy extra collisions. The numbers are small because the work being
+    // retried is one short transaction, not because they were measured.
+    private static void PauseBeforeRetrying(int attempt) =>
+        Thread.Sleep(Random.Shared.Next(4, 16) * attempt);
 
     // What a caller gets when it asks for a page without saying how big, and the
     // most it can ask for in one go. The ceiling is the point of the exercise: a
