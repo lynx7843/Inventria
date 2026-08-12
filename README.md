@@ -186,7 +186,7 @@ npm run format
 To copy a backup file out of the SQL Server container:
 
 ```bash
-podman cp mssql-server:/var/opt/mssql/data/<backup-name>.bak .
+podman cp mssql-server:/var/opt/mssql/data/WarehouseDB.bak
 ```
 
 Taking one before applying migrations is a good habit, since a rollback of the
