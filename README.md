@@ -210,5 +210,13 @@ data and a rollback of the schema are the same operation.
       <td><img src="img/login.png" alt="Login"><br><b>Login</b></td>
       <td><img src="img/admin_dashboard.png" alt="Admin_dashboard"><br><b>Admin Dashboard</b></td>
     </tr>
+    <tr>
+      <td><img src="img/employee_dashboard.png" alt="Employee Dashboard"><br><b>Employee Dashboard</b></td>
+      <td><img src="img/inventory.png" alt="Inventory_dashboard"><br><b>Inventory Dashboard</b></td>
+    </tr>
+    <tr>
+      <td><img src="img/bins.png" alt="Bins"><br><b>Warehouse Bins</b></td>
+      <td><img src="img/users.png" alt="Users_dashboard"><br><b>Users Dashboard</b></td>
+    </tr>
   </table>
 </div>
