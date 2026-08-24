@@ -45,10 +45,6 @@
     </div>
   </div>
 
-  <!-- Every entry that looks like a link is one. Settings has no page behind
-       it yet, and an href="#" that quietly does nothing reads as a broken app
-       rather than an unfinished one - so it says so instead, and cannot be
-       clicked or tabbed into until there is somewhere to go. -->
   <nav class="nav-links">
     <a href={dashboardHref} class:active={activePage === "Dashboard"}>Dashboard</a>
     <a href="/inventory" class:active={activePage === "Inventory"}>Inventory</a>
@@ -57,7 +53,7 @@
     {#if isAdmin}
       <a href="/users" class:active={activePage === "Users"}>Users</a>
     {/if}
-    <span class="nav-item unbuilt" aria-disabled="true">Settings<span class="tag">SOON</span></span>
+    <a href="/settings" class:active={activePage === "Settings"}>Settings</a>
   </nav>
 
   <div class="sidebar-footer">
@@ -79,11 +75,9 @@
   .brand-text h2 { margin: 0; font-size: 1.25rem; color: #0b6b36; }
   .brand-text p { margin: 0; font-size: 0.75rem; color: #64748b; }
   .nav-links { padding: 1.5rem 0; display: flex; flex-direction: column; flex-grow: 1; gap: 0.25rem; }
-  .nav-links a, .nav-links .nav-item { padding: 0.75rem 1.5rem; text-decoration: none; color: #475569; font-weight: 500; font-size: 0.9rem; border-left: 3px solid transparent; transition: all 0.2s; }
+  .nav-links a { padding: 0.75rem 1.5rem; text-decoration: none; color: #475569; font-weight: 500; font-size: 0.9rem; border-left: 3px solid transparent; transition: all 0.2s; }
   .nav-links a:hover { background: #f8fafc; }
   .nav-links a.active { background: #eefdf4; color: #0b6b36; border-left-color: #0b6b36; }
-  .nav-links .unbuilt { display: flex; align-items: center; justify-content: space-between; color: #94a3b8; cursor: default; }
-  .nav-links .tag { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.5px; color: #94a3b8; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0.1rem 0.35rem; }
   .sidebar-footer { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; border-top: 1px solid #e2e8f0; }
   .btn-new { background: #0b6b36; color: white; border: none; padding: 0.75rem; border-radius: 6px; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; font-size: 0.9rem; }
   .btn-new:hover { background: #095028; }
