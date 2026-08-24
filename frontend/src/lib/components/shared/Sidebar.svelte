@@ -45,15 +45,15 @@
     </div>
   </div>
 
-  <!-- Every entry that looks like a link is one. Reports and Settings have no
-       page behind them yet, and an href="#" that quietly does nothing reads as a
-       broken app rather than an unfinished one - so they say so instead, and
-       cannot be clicked or tabbed into until there is somewhere to go. -->
+  <!-- Every entry that looks like a link is one. Settings has no page behind
+       it yet, and an href="#" that quietly does nothing reads as a broken app
+       rather than an unfinished one - so it says so instead, and cannot be
+       clicked or tabbed into until there is somewhere to go. -->
   <nav class="nav-links">
     <a href={dashboardHref} class:active={activePage === "Dashboard"}>Dashboard</a>
     <a href="/inventory" class:active={activePage === "Inventory"}>Inventory</a>
     <a href="/bins" class:active={activePage === "Bins"}>Bins</a>
-    <span class="nav-item unbuilt" aria-disabled="true">Reports<span class="tag">SOON</span></span>
+    <a href="/reports" class:active={activePage === "Reports"}>Reports</a>
     {#if isAdmin}
       <a href="/users" class:active={activePage === "Users"}>Users</a>
     {/if}
