@@ -2,31 +2,25 @@
   import Sidebar from '$lib/components/shared/Sidebar.svelte';
   import Header from '$lib/components/shared/Header.svelte';
   import { onMount } from 'svelte';
-  import { requireSession, getUsername, getRole } from '$lib/auth';
+  import { requireSession, getUsername, getRole, saveSession, endExpiredSession } from '$lib/auth';
+  import { apiFetch, apiErrorMessage } from '$lib/api';
 
   // Open to anyone signed in - there's nothing here an Employee shouldn't see
   // about their own account.
   let allowed = $state(false);
 
-  // The only two facts about the account this page actually has: the API
-  // issues neither an email address nor a display name distinct from the
-  // username, so those are what the form shows rather than a fabricated
-  // "Jane Doe" / "jane.doe@inventria.com". Role is read-only here - it isn't
-  // self-service, an Admin sets it from the Users screen.
+  // Prefilled from what's cached locally; PATCH /api/users/me refreshes both
+  // once the account is loaded, since email isn't part of that cache.
   let fullName = $state(getUsername() ?? '');
   const role = getRole() ?? '';
-
-  // No email field exists on the account yet, so there's nothing to prefill -
-  // an empty box beats a domain nobody actually owns.
   let email = $state('');
 
-  // Nothing here is sent anywhere: there's no PATCH /api/users/me yet, so
-  // "Save" only flashes a local confirmation and "Change Photo" only previews
-  // the picked file in the avatar - both reset the moment the page reloads.
-  let photoUrl = $state<string | null>(null);
   let showSavedFlash = $state(false);
   let savedTimer: ReturnType<typeof setTimeout> | undefined;
+  let errorMsg = $state('');
+  let saving = $state(false);
 
+  // Not wired to anything yet - purely local UI state for the toggles below.
   let notifyLowStock = $state(true);
   let notifyDailySummary = $state(false);
 
@@ -41,22 +35,43 @@
     return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
   }
 
-  function handlePhotoPick(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
+  async function saveChanges() {
+    errorMsg = '';
+    saving = true;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      photoUrl = typeof reader.result === 'string' ? reader.result : null;
-    };
-    reader.readAsDataURL(file);
-  }
+    try {
+      const res = await apiFetch('/api/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: fullName, email })
+      });
 
-  function saveChanges() {
-    clearTimeout(savedTimer);
-    showSavedFlash = true;
-    savedTimer = setTimeout(() => (showSavedFlash = false), 2500);
+      if (res.ok) {
+        const data = await res.json();
+        fullName = data.username;
+        email = data.email;
+        // The cached username drives layout and greetings elsewhere in the
+        // app - it has to move with a rename or those go stale immediately.
+        saveSession(data.username, role as 'Admin' | 'Employee');
+
+        clearTimeout(savedTimer);
+        showSavedFlash = true;
+        savedTimer = setTimeout(() => (showSavedFlash = false), 2500);
+        return;
+      }
+
+      if (res.status === 401) {
+        endExpiredSession();
+        return;
+      }
+
+      errorMsg = await apiErrorMessage(res, 'Failed to save changes.');
+    } catch (err) {
+      console.error(err);
+      errorMsg = 'A network error occurred while saving.';
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -78,22 +93,8 @@
       <div class="acct-content">
         <div class="avatar-col">
           <div class="avatar-wrap">
-            {#if photoUrl}
-              <img src={photoUrl} alt="Profile" />
-            {:else}
-              <span class="avatar-initials">{initials(fullName)}</span>
-            {/if}
+            <span class="avatar-initials">{initials(fullName)}</span>
           </div>
-          <button class="change-photo-btn" onclick={() => document.getElementById('photo-input')?.click()}>
-            Change Photo
-          </button>
-          <input
-            id="photo-input"
-            type="file"
-            accept="image/*"
-            style="display: none"
-            onchange={handlePhotoPick}
-          />
         </div>
 
         <div class="fields-col">
@@ -123,13 +124,18 @@
       <div class="panel-footer">
         <hr class="divider" />
         <div class="footer-actions">
+          {#if errorMsg}
+            <span class="save-error">{errorMsg}</span>
+          {/if}
           {#if showSavedFlash}
             <span class="save-flash">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a6b3c" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
               Changes saved!
             </span>
           {/if}
-          <button class="save-btn" onclick={saveChanges}>Save Changes</button>
+          <button class="save-btn" onclick={saveChanges} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
         </div>
       </div>
     </div>
@@ -225,10 +231,7 @@
   .acct-content { display: flex; gap: 1.5rem; align-items: flex-start; }
   .avatar-col { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; flex-shrink: 0; }
   .avatar-wrap { width: 96px; height: 96px; border-radius: 10px; overflow: hidden; border: 1px solid #e2e8f0; background: #eefdf4; display: flex; align-items: center; justify-content: center; }
-  .avatar-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .avatar-initials { font-size: 1.75rem; font-weight: 700; color: #0b6b36; }
-  .change-photo-btn { padding: 0.4rem 0.85rem; border: 1.5px solid #0b6b36; border-radius: 6px; background: transparent; color: #0b6b36; font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; transition: background .15s, color .15s; }
-  .change-photo-btn:hover { background: #0b6b36; color: white; }
 
   .fields-col { flex: 1; display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
   .fields-row { display: flex; gap: 1rem; }
@@ -242,7 +245,9 @@
   .footer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; }
   .save-btn { padding: 0.6rem 1.4rem; background: #0b6b36; color: white; border: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; }
   .save-btn:hover { background: #095028; }
+  .save-btn:disabled { background: #94a3b8; cursor: not-allowed; }
   .save-flash { display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: #0b6b36; font-weight: 500; }
+  .save-error { font-size: 0.8rem; color: #b91c1c; font-weight: 500; }
 
   /* Right column */
   .right-col { display: flex; flex-direction: column; gap: 1.5rem; }
