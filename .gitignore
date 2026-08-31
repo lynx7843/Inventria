@@ -1,1 +1,5 @@
 .claude/
+
+# `dotnet test --results-directory` at the repo root (what CI does) drops .trx
+# files here. The per-project ignores only cover backend/ and backend.Tests/.
+TestResults/

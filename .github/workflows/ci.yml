@@ -1,0 +1,175 @@
+name: CI
+
+# Runs on the branches this project actually uses: work happens on `features`
+# and lands on `main` through a PR, so both need to be checked.
+on:
+  push:
+    branches: [main, features]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A second push to the same branch makes the first one's answer irrelevant.
+# Cancelling it keeps the queue short and the feedback fast.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only: nothing here publishes, comments, or pushes.
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (build + test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # Keyed on the project files because those are what decide the package
+      # set; the restore-keys line lets an unrelated csproj edit reuse most of
+      # the previous cache instead of downloading everything again.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Inventria.sln
+
+      - name: Build
+        run: dotnet build Inventria.sln --no-restore -c Release
+
+      # The suite needs no SQL Server: TestDatabase builds each case a real
+      # relational database in memory with SQLite, so there is no service
+      # container to start and nothing to wait on.
+      - name: Test
+        run: >
+          dotnet test Inventria.sln --no-build -c Release
+          --logger "trx;LogFileName=results.trx"
+          --results-directory ${{ github.workspace }}/TestResults
+
+      # `always()` so a failing run still uploads the results that explain it.
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: ${{ github.workspace }}/TestResults/*.trx
+          if-no-files-found: warn
+
+  migrations:
+    name: EF migrations in sync
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Install dotnet-ef
+        run: |
+          dotnet tool install --global dotnet-ef --version 9.*
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # Catches the mistake of editing a model and forgetting the migration:
+      # the code would build and every test would pass, and the schema would
+      # only be found wrong against a real database. This asks EF to compare the
+      # model it builds from the code against the snapshot the migrations
+      # produce, and fails when they have drifted apart.
+      #
+      # Jwt__Key is set because Program.cs refuses to start without one, and
+      # `dotnet ef` builds the app's service provider to find the DbContext.
+      # This value signs nothing - it exists only to get past that check at
+      # design time - so it is deliberately a literal and not a repository
+      # secret. No database is contacted; the command never opens a connection.
+      - name: Check for un-migrated model changes
+        env:
+          Jwt__Key: design-time-only-not-a-secret-placeholder-key
+        run: dotnet ef migrations has-pending-model-changes --project backend
+
+  frontend:
+    name: Frontend (check + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci` rather than `npm install`: it installs exactly the lockfile and
+      # fails if package.json has drifted from it, which is what makes the build
+      # reproducible.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (svelte-check)
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+  lint:
+    name: Lint and formatting
+    runs-on: ubuntu-latest
+    # NON-BLOCKING FOR NOW - and this is deliberate, not an oversight.
+    #
+    # `npm run lint` currently fails on the existing codebase: prettier reports
+    # 17 unformatted files and eslint reports 27 errors, nearly all of them
+    # `svelte/require-each-key` on {#each} blocks that predate this workflow.
+    # Gating on that today would mean every pull request is red for reasons
+    # nobody in it introduced, which trains people to ignore the red.
+    #
+    # So the job runs and reports, but does not fail the build. Once the backlog
+    # is cleared (see upgrade.txt, item 0) delete this line and lint becomes a
+    # real gate.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Run separately rather than through `npm run lint`, which chains them
+      # with && - that hides every eslint error behind the first formatting
+      # complaint. `always()` on the second step keeps both reports visible in
+      # one run.
+      - name: Formatting (prettier)
+        run: npx prettier --check .
+
+      - name: Lint (eslint)
+        if: always()
+        run: npx eslint .
