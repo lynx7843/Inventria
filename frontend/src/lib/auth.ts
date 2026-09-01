@@ -1,5 +1,6 @@
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
+import { resolve } from '$app/paths';
 
 /** The roles the API issues; mirrors `User.Role` on the backend. */
 export type Role = 'Admin' | 'Employee';
@@ -48,8 +49,8 @@ export function endExpiredSession(): void {
 }
 
 /** Where a role lands after signing in, and where it gets sent back to. */
-export function homeFor(role: Role): string {
-	return role === 'Admin' ? '/admin' : '/employee';
+export function homeFor(role: Role) {
+	return role === 'Admin' ? resolve('/admin') : resolve('/employee');
 }
 
 /**
@@ -73,12 +74,12 @@ export function requireSession(allowed?: Role[]): boolean {
 	const role = getRole();
 	if (!role) {
 		clearSession();
-		goto('/', { replaceState: true });
+		goto(resolve('/'), { replaceState: true });
 		return false;
 	}
 
 	if (allowed && !allowed.includes(role)) {
-		goto(homeFor(role), { replaceState: true });
+		goto(role === 'Admin' ? resolve('/admin') : resolve('/employee'), { replaceState: true });
 		return false;
 	}
 

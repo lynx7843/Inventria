@@ -1,306 +1,474 @@
 <script lang="ts">
-  import Sidebar from '$lib/components/shared/Sidebar.svelte';
-  import Header from '$lib/components/shared/Header.svelte';
-  import InputField from '$lib/components/shared/InputField.svelte';
-  import Button from '$lib/components/shared/Button.svelte';
-  import { onMount } from 'svelte';
-  import { apiFetch, apiErrorMessage } from '$lib/api';
-  import { endExpiredSession, requireSession } from '$lib/auth';
-  import { fetchItemPage, type Item } from '$lib/inventory';
+	import Sidebar from '$lib/components/shared/Sidebar.svelte';
+	import Header from '$lib/components/shared/Header.svelte';
+	import InputField from '$lib/components/shared/InputField.svelte';
+	import Button from '$lib/components/shared/Button.svelte';
+	import { onMount } from 'svelte';
+	import { apiFetch, apiErrorMessage } from '$lib/api';
+	import { endExpiredSession, requireSession } from '$lib/auth';
+	import { fetchItemPage, type Item } from '$lib/inventory';
 
-  // Gates the markup below. No role list: Admins and Employees both manage
-  // inventory, so this only requires that someone is signed in.
-  let allowed = $state(false);
+	// Gates the markup below. No role list: Admins and Employees both manage
+	// inventory, so this only requires that someone is signed in.
+	let allowed = $state(false);
 
-  let items: Item[] = $state([]);
-  let isLoading = $state(true);
-  let errorMsg = $state('');
+	let items: Item[] = $state([]);
+	let isLoading = $state(true);
+	let errorMsg = $state('');
 
-  // Where in the catalogue this table is. The API serves a page at a time, so
-  // the table has to say which one and offer the way to the rest.
-  const pageSize = 25;
-  let page = $state(1);
-  let totalPages = $state(1);
-  let totalCount = $state(0);
+	// Where in the catalogue this table is. The API serves a page at a time, so
+	// the table has to say which one and offer the way to the rest.
+	const pageSize = 25;
+	let page = $state(1);
+	let totalPages = $state(1);
+	let totalCount = $state(0);
 
-  // Form State
-  let showForm = $state(false);
-  let isEditing = $state(false);
-  let editingId: number | null = $state(null);
-  
-  let sku = $state('');
-  let name = $state('');
-  let category = $state('');
+	// Form State
+	let showForm = $state(false);
+	let isEditing = $state(false);
+	let editingId: number | null = $state(null);
 
-  // 1. Fetch One Page Of Items (Read)
-  async function loadItems() {
-    isLoading = true;
-    try {
-      const result = await fetchItemPage(page, pageSize);
+	let sku = $state('');
+	let name = $state('');
+	let category = $state('');
 
-      items = result.items;
-      totalPages = result.totalPages;
-      totalCount = result.totalCount;
+	// 1. Fetch One Page Of Items (Read)
+	async function loadItems() {
+		isLoading = true;
+		try {
+			const result = await fetchItemPage(page, pageSize);
 
-      // Deleting the last item on the last page leaves this table looking at a
-      // page that no longer exists. Step back rather than show an empty table
-      // that reads as "no items".
-      if (items.length === 0 && page > 1) {
-        page = Math.min(page - 1, Math.max(result.totalPages, 1));
-        await loadItems();
-      }
-    } catch (err) {
-      // fetchItemPage sends an expired session back to login by itself; anything
-      // that reaches here is a failure worth naming. Swallowing it left the
-      // table empty under "No items found", which is a claim about the warehouse
-      // rather than an admission that the request failed.
-      console.error(err);
-      errorMsg = err instanceof Error ? err.message : 'Failed to load items.';
-    } finally {
-      isLoading = false;
-    }
-  }
+			items = result.items;
+			totalPages = result.totalPages;
+			totalCount = result.totalCount;
 
-  async function goToPage(next: number) {
-    if (next < 1 || next > totalPages || next === page) return;
-    page = next;
-    errorMsg = '';
-    await loadItems();
-  }
+			// Deleting the last item on the last page leaves this table looking at a
+			// page that no longer exists. Step back rather than show an empty table
+			// that reads as "no items".
+			if (items.length === 0 && page > 1) {
+				page = Math.min(page - 1, Math.max(result.totalPages, 1));
+				await loadItems();
+			}
+		} catch (err) {
+			// fetchItemPage sends an expired session back to login by itself; anything
+			// that reaches here is a failure worth naming. Swallowing it left the
+			// table empty under "No items found", which is a claim about the warehouse
+			// rather than an admission that the request failed.
+			console.error(err);
+			errorMsg = err instanceof Error ? err.message : 'Failed to load items.';
+		} finally {
+			isLoading = false;
+		}
+	}
 
-  onMount(() => {
-    if (!requireSession()) return;
-    allowed = true;
+	async function goToPage(next: number) {
+		if (next < 1 || next > totalPages || next === page) return;
+		page = next;
+		errorMsg = '';
+		await loadItems();
+	}
 
-    // The sidebar's "+ New Entry" links here with ?new=1, meaning "I already
-    // said I want to create something" - so open the form rather than making
-    // them say it twice.
-    if (new URLSearchParams(window.location.search).has('new')) {
-      openNewForm();
-    }
+	onMount(() => {
+		if (!requireSession()) return;
+		allowed = true;
 
-    loadItems();
-  });
+		// The sidebar's "+ New Entry" links here with ?new=1, meaning "I already
+		// said I want to create something" - so open the form rather than making
+		// them say it twice.
+		if (new URLSearchParams(window.location.search).has('new')) {
+			openNewForm();
+		}
 
-  // 2. Save Item (Create or Update)
-  async function saveItem() {
-    errorMsg = '';
+		loadItems();
+	});
 
-    const path = isEditing
-      ? `/api/inventory/items/${editingId}`
-      : '/api/inventory/items';
+	// 2. Save Item (Create or Update)
+	async function saveItem() {
+		errorMsg = '';
 
-    const method = isEditing ? 'PUT' : 'POST';
+		const path = isEditing ? `/api/inventory/items/${editingId}` : '/api/inventory/items';
 
-    try {
-      const res = await apiFetch(path, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sku, name, category })
-      });
+		const method = isEditing ? 'PUT' : 'POST';
 
-      if (res.ok) {
-        closeForm();
-        // A saved item sorts by name and may belong on another page entirely;
-        // the first page is where someone who just created one starts looking.
-        if (!isEditing) page = 1;
-        await loadItems(); // Refresh the table
-        return;
-      }
+		try {
+			const res = await apiFetch(path, {
+				method,
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ sku, name, category })
+			});
 
-      // A session that expired while the form was open. Reading this as a
-      // message would find no body to read and report the expiry as a network
-      // failure, leaving them retyping a SKU that was never going to save.
-      if (res.status === 401) {
-        endExpiredSession();
-        return;
-      }
+			if (res.ok) {
+				closeForm();
+				// A saved item sorts by name and may belong on another page entirely;
+				// the first page is where someone who just created one starts looking.
+				if (!isEditing) page = 1;
+				await loadItems(); // Refresh the table
+				return;
+			}
 
-      // Blank fields, an over-long value or a SKU another item already uses.
-      // The server says which; dropping the response left the form looking
-      // like it had simply ignored the click.
-      errorMsg = await apiErrorMessage(res, 'Failed to save item.');
-    } catch (err) {
-      console.error(err);
-      errorMsg = 'A network error occurred while saving.';
-    }
-  }
+			// A session that expired while the form was open. Reading this as a
+			// message would find no body to read and report the expiry as a network
+			// failure, leaving them retyping a SKU that was never going to save.
+			if (res.status === 401) {
+				endExpiredSession();
+				return;
+			}
 
-  // 3. Delete Item
-  async function deleteItem(id: number) {
-    if (!confirm('Are you sure you want to delete this item?')) return;
+			// Blank fields, an over-long value or a SKU another item already uses.
+			// The server says which; dropping the response left the form looking
+			// like it had simply ignored the click.
+			errorMsg = await apiErrorMessage(res, 'Failed to save item.');
+		} catch (err) {
+			console.error(err);
+			errorMsg = 'A network error occurred while saving.';
+		}
+	}
 
-    errorMsg = '';
+	// 3. Delete Item
+	async function deleteItem(id: number) {
+		if (!confirm('Are you sure you want to delete this item?')) return;
 
-    try {
-      const res = await apiFetch(`/api/inventory/items/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        await loadItems();
-        return;
-      }
+		errorMsg = '';
 
-      if (res.status === 401) {
-        endExpiredSession();
-        return;
-      }
+		try {
+			const res = await apiFetch(`/api/inventory/items/${id}`, {
+				method: 'DELETE'
+			});
+			if (res.ok) {
+				await loadItems();
+				return;
+			}
 
-      // The server refuses to delete an item that still holds stock or has
-      // movement history. Silently doing nothing looked like a broken button.
-      errorMsg = await apiErrorMessage(res, 'Failed to delete item.');
-    } catch (err) {
-      console.error(err);
-      errorMsg = 'A network error occurred while deleting.';
-    }
-  }
+			if (res.status === 401) {
+				endExpiredSession();
+				return;
+			}
 
-  // UI Helpers
-  function openNewForm() {
-    isEditing = false;
-    editingId = null;
-    sku = '';
-    name = '';
-    category = '';
-    errorMsg = '';
-    showForm = true;
-  }
+			// The server refuses to delete an item that still holds stock or has
+			// movement history. Silently doing nothing looked like a broken button.
+			errorMsg = await apiErrorMessage(res, 'Failed to delete item.');
+		} catch (err) {
+			console.error(err);
+			errorMsg = 'A network error occurred while deleting.';
+		}
+	}
 
-  function openEditForm(item: Item) {
-    isEditing = true;
-    editingId = item.id;
-    sku = item.sku;
-    name = item.name;
-    category = item.category;
-    errorMsg = '';
-    showForm = true;
-  }
+	// UI Helpers
+	function openNewForm() {
+		isEditing = false;
+		editingId = null;
+		sku = '';
+		name = '';
+		category = '';
+		errorMsg = '';
+		showForm = true;
+	}
 
-  function closeForm() {
-    showForm = false;
-  }
+	function openEditForm(item: Item) {
+		isEditing = true;
+		editingId = item.id;
+		sku = item.sku;
+		name = item.name;
+		category = item.category;
+		errorMsg = '';
+		showForm = true;
+	}
+
+	function closeForm() {
+		showForm = false;
+	}
 </script>
 
 {#if allowed}
-<Sidebar activePage="Inventory" />
-<Header />
+	<Sidebar activePage="Inventory" />
+	<Header />
 
-<main class="dashboard-content">
-  <div class="page-header">
-    <div>
-      <h2>Master Inventory</h2>
-      <p>Manage product definitions, SKUs, and categories.</p>
-    </div>
-    {#if !showForm}
-      <button class="btn-solid" onclick={openNewForm}>+ Add New SKU</button>
-    {/if}
-  </div>
+	<main class="dashboard-content">
+		<div class="page-header">
+			<div>
+				<h2>Master Inventory</h2>
+				<p>Manage product definitions, SKUs, and categories.</p>
+			</div>
+			{#if !showForm}
+				<button class="btn-solid" onclick={openNewForm}>+ Add New SKU</button>
+			{/if}
+		</div>
 
-  {#if errorMsg}
-    <div class="alert alert-error">{errorMsg}</div>
-  {/if}
+		{#if errorMsg}
+			<div class="alert alert-error">{errorMsg}</div>
+		{/if}
 
-  {#if showForm}
-    <div class="panel form-panel">
-      <h3>{isEditing ? 'Edit Item' : 'Create New Item'}</h3>
-      <form onsubmit={(e) => { e.preventDefault(); saveItem(); }} class="form-grid">
-        <div class="input-row">
-          <InputField id="sku" label="SKU CODE" placeholder="e.g., SKU-100" bind:value={sku} required={true} />
-          <InputField id="name" label="PRODUCT NAME" placeholder="e.g., Steel Wrench" bind:value={name} required={true} />
-          <InputField id="category" label="CATEGORY" placeholder="e.g., Tools" bind:value={category} required={true} />
-        </div>
-        <div class="actions">
-          <button type="button" class="btn-outline" onclick={closeForm}>Cancel</button>
-          <div class="submit-wrap"><Button type="submit" text={isEditing ? 'Update Item' : 'Save Item'} /></div>
-        </div>
-      </form>
-    </div>
-  {/if}
+		{#if showForm}
+			<div class="panel form-panel">
+				<h3>{isEditing ? 'Edit Item' : 'Create New Item'}</h3>
+				<form
+					onsubmit={(e) => {
+						e.preventDefault();
+						saveItem();
+					}}
+					class="form-grid"
+				>
+					<div class="input-row">
+						<InputField
+							id="sku"
+							label="SKU CODE"
+							placeholder="e.g., SKU-100"
+							bind:value={sku}
+							required={true}
+						/>
+						<InputField
+							id="name"
+							label="PRODUCT NAME"
+							placeholder="e.g., Steel Wrench"
+							bind:value={name}
+							required={true}
+						/>
+						<InputField
+							id="category"
+							label="CATEGORY"
+							placeholder="e.g., Tools"
+							bind:value={category}
+							required={true}
+						/>
+					</div>
+					<div class="actions">
+						<button type="button" class="btn-outline" onclick={closeForm}>Cancel</button>
+						<div class="submit-wrap">
+							<Button type="submit" text={isEditing ? 'Update Item' : 'Save Item'} />
+						</div>
+					</div>
+				</form>
+			</div>
+		{/if}
 
-  <div class="panel">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>ITEM NAME</th>
-          <th>SKU</th>
-          <th>CATEGORY</th>
-          <th class="text-right">ACTIONS</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#if isLoading}
-          <tr><td colspan="5" class="empty-state">Loading database...</td></tr>
-        {:else if items.length === 0}
-          <tr><td colspan="5" class="empty-state">No items found. Create one above.</td></tr>
-        {:else}
-          {#each items as item}
-            <tr>
-              <td class="text-muted">#{item.id}</td>
-              <td><strong>{item.name}</strong></td>
-              <td><span class="badge gray">{item.sku}</span></td>
-              <td>{item.category}</td>
-              <td class="text-right action-btns">
-                <button class="btn-icon edit" onclick={() => openEditForm(item)}>✏️</button>
-                <button class="btn-icon delete" onclick={() => deleteItem(item.id)}>🗑️</button>
-              </td>
-            </tr>
-          {/each}
-        {/if}
-      </tbody>
-    </table>
+		<div class="panel">
+			<table class="data-table">
+				<thead>
+					<tr>
+						<th>ID</th>
+						<th>ITEM NAME</th>
+						<th>SKU</th>
+						<th>CATEGORY</th>
+						<th class="text-right">ACTIONS</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#if isLoading}
+						<tr><td colspan="5" class="empty-state">Loading database...</td></tr>
+					{:else if items.length === 0}
+						<tr><td colspan="5" class="empty-state">No items found. Create one above.</td></tr>
+					{:else}
+						{#each items as item (item.id)}
+							<tr>
+								<td class="text-muted">#{item.id}</td>
+								<td><strong>{item.name}</strong></td>
+								<td><span class="badge gray">{item.sku}</span></td>
+								<td>{item.category}</td>
+								<td class="text-right action-btns">
+									<button class="btn-icon edit" onclick={() => openEditForm(item)}>✏️</button>
+									<button class="btn-icon delete" onclick={() => deleteItem(item.id)}>🗑️</button>
+								</td>
+							</tr>
+						{/each}
+					{/if}
+				</tbody>
+			</table>
 
-    {#if totalCount > 0}
-      <div class="pager">
-        <span class="pager-status">
-          Showing {items.length} of {totalCount} item{totalCount === 1 ? '' : 's'} &middot; page {page} of {totalPages}
-        </span>
-        <div class="pager-buttons">
-          <button class="btn-outline" onclick={() => goToPage(page - 1)} disabled={page <= 1 || isLoading}>Previous</button>
-          <button class="btn-outline" onclick={() => goToPage(page + 1)} disabled={page >= totalPages || isLoading}>Next</button>
-        </div>
-      </div>
-    {/if}
-  </div>
-</main>
+			{#if totalCount > 0}
+				<div class="pager">
+					<span class="pager-status">
+						Showing {items.length} of {totalCount} item{totalCount === 1 ? '' : 's'} &middot; page {page}
+						of {totalPages}
+					</span>
+					<div class="pager-buttons">
+						<button
+							class="btn-outline"
+							onclick={() => goToPage(page - 1)}
+							disabled={page <= 1 || isLoading}>Previous</button
+						>
+						<button
+							class="btn-outline"
+							onclick={() => goToPage(page + 1)}
+							disabled={page >= totalPages || isLoading}>Next</button
+						>
+					</div>
+				</div>
+			{/if}
+		</div>
+	</main>
 {/if}
 
 <style>
-  .dashboard-content { margin-left: 250px; padding: 2rem; background: #f8fafc; min-height: calc(100vh - 70px); }
-  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
-  .page-header h2 { margin: 0 0 0.25rem 0; color: #0f172a; }
-  .page-header p { margin: 0; color: #64748b; }
-  
-  .btn-solid { background: #0b6b36; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; font-weight: 600; cursor: pointer; }
-  .btn-outline { background: white; color: #475569; border: 1px solid #cbd5e1; padding: 0.6rem 1.2rem; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-  .btn-outline:hover { background: #f1f5f9; }
-  
-  .panel { background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 2rem; }
-  .form-panel h3 { margin: 0 0 1.5rem 0; font-size: 1.1rem; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.75rem; }
-  .input-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-  .actions { display: flex; justify-content: flex-end; gap: 1rem; align-items: center; }
-  .submit-wrap { width: 150px; }
+	.dashboard-content {
+		margin-left: 250px;
+		padding: 2rem;
+		background: #f8fafc;
+		min-height: calc(100vh - 70px);
+	}
+	.page-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 2rem;
+	}
+	.page-header h2 {
+		margin: 0 0 0.25rem 0;
+		color: #0f172a;
+	}
+	.page-header p {
+		margin: 0;
+		color: #64748b;
+	}
 
-  .data-table { width: 100%; border-collapse: collapse; text-align: left; }
-  .data-table th { padding: 1rem; border-bottom: 2px solid #e2e8f0; color: #64748b; font-size: 0.75rem; letter-spacing: 0.5px; }
-  .data-table td { padding: 1rem; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; color: #475569; }
-  .data-table td strong { color: #0f172a; }
-  .empty-state { text-align: center; padding: 3rem; color: #64748b; font-style: italic; }
-  
-  .text-right { text-align: right; }
-  .text-muted { color: #94a3b8; font-size: 0.8rem; }
-  .badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; font-family: monospace; }
-  .badge.gray { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+	.btn-solid {
+		background: #0b6b36;
+		color: white;
+		border: none;
+		padding: 0.6rem 1.2rem;
+		border-radius: 6px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.btn-outline {
+		background: white;
+		color: #475569;
+		border: 1px solid #cbd5e1;
+		padding: 0.6rem 1.2rem;
+		border-radius: 6px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+	.btn-outline:hover {
+		background: #f1f5f9;
+	}
 
-  .action-btns { display: flex; gap: 0.5rem; justify-content: flex-end; }
-  .btn-icon { background: none; border: none; font-size: 1.1rem; cursor: pointer; opacity: 0.6; transition: opacity 0.2s; padding: 0.25rem; }
-  .btn-icon:hover { opacity: 1; }
+	.panel {
+		background: white;
+		padding: 1.5rem;
+		border-radius: 8px;
+		border: 1px solid #e2e8f0;
+		margin-bottom: 2rem;
+	}
+	.form-panel h3 {
+		margin: 0 0 1.5rem 0;
+		font-size: 1.1rem;
+		color: #0f172a;
+		border-bottom: 1px solid #e2e8f0;
+		padding-bottom: 0.75rem;
+	}
+	.input-row {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 1rem;
+		margin-bottom: 1.5rem;
+	}
+	.actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 1rem;
+		align-items: center;
+	}
+	.submit-wrap {
+		width: 150px;
+	}
 
-  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
-  .pager-status { font-size: 0.8rem; color: #64748b; }
-  .pager-buttons { display: flex; gap: 0.5rem; }
-  .pager-buttons .btn-outline:disabled { color: #94a3b8; border-color: #e2e8f0; cursor: not-allowed; }
+	.data-table {
+		width: 100%;
+		border-collapse: collapse;
+		text-align: left;
+	}
+	.data-table th {
+		padding: 1rem;
+		border-bottom: 2px solid #e2e8f0;
+		color: #64748b;
+		font-size: 0.75rem;
+		letter-spacing: 0.5px;
+	}
+	.data-table td {
+		padding: 1rem;
+		border-bottom: 1px solid #e2e8f0;
+		font-size: 0.9rem;
+		color: #475569;
+	}
+	.data-table td strong {
+		color: #0f172a;
+	}
+	.empty-state {
+		text-align: center;
+		padding: 3rem;
+		color: #64748b;
+		font-style: italic;
+	}
 
-  .alert { padding: 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1.5rem; font-weight: 500; }
-  .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
+	.text-right {
+		text-align: right;
+	}
+	.text-muted {
+		color: #94a3b8;
+		font-size: 0.8rem;
+	}
+	.badge {
+		padding: 0.25rem 0.5rem;
+		border-radius: 4px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		font-family: monospace;
+	}
+	.badge.gray {
+		background: #f1f5f9;
+		color: #475569;
+		border: 1px solid #e2e8f0;
+	}
+
+	.action-btns {
+		display: flex;
+		gap: 0.5rem;
+		justify-content: flex-end;
+	}
+	.btn-icon {
+		background: none;
+		border: none;
+		font-size: 1.1rem;
+		cursor: pointer;
+		opacity: 0.6;
+		transition: opacity 0.2s;
+		padding: 0.25rem;
+	}
+	.btn-icon:hover {
+		opacity: 1;
+	}
+
+	.pager {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-top: 1rem;
+	}
+	.pager-status {
+		font-size: 0.8rem;
+		color: #64748b;
+	}
+	.pager-buttons {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.pager-buttons .btn-outline:disabled {
+		color: #94a3b8;
+		border-color: #e2e8f0;
+		cursor: not-allowed;
+	}
+
+	.alert {
+		padding: 0.75rem;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		margin-bottom: 1.5rem;
+		font-weight: 500;
+	}
+	.alert-error {
+		background: #fee2e2;
+		color: #991b1b;
+		border: 1px solid #f87171;
+	}
 </style>
