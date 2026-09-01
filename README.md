@@ -1,5 +1,7 @@
 # 📦 Inventria - Inventory Management System
 
+![CI](https://github.com/lynx7843/Inventria/actions/workflows/ci.yml/badge.svg)
+
 A warehouse management system built with a SvelteKit frontend and an ASP.NET Core 9 backend, designed to help manage products, stock levels, and inventory operations efficiently.  
 The system is connected to a Microsoft SQL Server database for fast, reliable, and structured data storage.
 
