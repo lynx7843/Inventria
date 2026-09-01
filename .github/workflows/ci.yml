@@ -135,18 +135,6 @@ jobs:
   lint:
     name: Lint and formatting
     runs-on: ubuntu-latest
-    # NON-BLOCKING FOR NOW - and this is deliberate, not an oversight.
-    #
-    # `npm run lint` currently fails on the existing codebase: prettier reports
-    # 17 unformatted files and eslint reports 27 errors, nearly all of them
-    # `svelte/require-each-key` on {#each} blocks that predate this workflow.
-    # Gating on that today would mean every pull request is red for reasons
-    # nobody in it introduced, which trains people to ignore the red.
-    #
-    # So the job runs and reports, but does not fail the build. Once the backlog
-    # is cleared (see upgrade.txt, item 0) delete this line and lint becomes a
-    # real gate.
-    continue-on-error: true
     defaults:
       run:
         working-directory: frontend
