@@ -9,20 +9,21 @@
 	// about their own account.
 	let allowed = $state(false);
 
-	// Prefilled from what's cached locally; PATCH /api/users/me refreshes both
-	// once the account is loaded, since email isn't part of that cache.
+	// Prefilled from what's cached locally so the page has a name to show
+	// immediately; GET /api/users/me overwrites all four fields below once the
+	// account loads, which is the only place any of this - email included -
+	// is actually read back from.
 	let fullName = $state(getUsername() ?? '');
 	const role = getRole() ?? '';
 	let email = $state('');
+	let notifyLowStock = $state(true);
+	let notifyDailySummary = $state(false);
+	let isLoadingProfile = $state(true);
 
 	let showSavedFlash = $state(false);
 	let savedTimer: ReturnType<typeof setTimeout> | undefined;
 	let errorMsg = $state('');
 	let saving = $state(false);
-
-	// Not wired to anything yet - purely local UI state for the toggles below.
-	let notifyLowStock = $state(true);
-	let notifyDailySummary = $state(false);
 
 	let showPasswordForm = $state(false);
 	let currentPassword = $state('');
@@ -32,9 +33,34 @@
 	let passwordSuccess = $state('');
 	let changingPassword = $state(false);
 
-	onMount(() => {
+	onMount(async () => {
 		if (!requireSession()) return;
 		allowed = true;
+
+		try {
+			const res = await apiFetch('/api/users/me');
+
+			if (res.status === 401) {
+				endExpiredSession();
+				return;
+			}
+
+			if (!res.ok) {
+				errorMsg = await apiErrorMessage(res, 'Failed to load your account.');
+				return;
+			}
+
+			const data = await res.json();
+			fullName = data.username;
+			email = data.email;
+			notifyLowStock = data.notifyLowStock;
+			notifyDailySummary = data.notifyDailySummary;
+		} catch (err) {
+			console.error(err);
+			errorMsg = 'A network error occurred while loading your account.';
+		} finally {
+			isLoadingProfile = false;
+		}
 	});
 
 	function initials(name: string): string {
@@ -51,13 +77,20 @@
 			const res = await apiFetch('/api/users/me', {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ username: fullName, email })
+				body: JSON.stringify({
+					username: fullName,
+					email,
+					notifyLowStock,
+					notifyDailySummary
+				})
 			});
 
 			if (res.ok) {
 				const data = await res.json();
 				fullName = data.username;
 				email = data.email;
+				notifyLowStock = data.notifyLowStock;
+				notifyDailySummary = data.notifyDailySummary;
 				// The cached username drives layout and greetings elsewhere in the
 				// app - it has to move with a rename or those go stale immediately.
 				saveSession(data.username, role as 'Admin' | 'Employee');
@@ -368,6 +401,7 @@
 								role="switch"
 								aria-checked={notifyLowStock}
 								aria-label="Low Stock Email Alerts"
+								disabled={isLoadingProfile}
 								onclick={() => (notifyLowStock = !notifyLowStock)}
 							>
 								<span class="thumb"></span>
@@ -384,6 +418,7 @@
 								role="switch"
 								aria-checked={notifyDailySummary}
 								aria-label="Daily Summary Push"
+								disabled={isLoadingProfile}
 								onclick={() => (notifyDailySummary = !notifyDailySummary)}
 							>
 								<span class="thumb"></span>
@@ -712,6 +747,10 @@
 		flex-shrink: 0;
 		transition: background 0.2s;
 		margin-top: 1px;
+	}
+	.toggle:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
 	}
 	.toggle.on {
 		background: #0b6b36;

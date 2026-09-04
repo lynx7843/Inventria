@@ -24,6 +24,27 @@ public class UserProfileController : ControllerBase
         _context = context;
     }
 
+    // What the Settings page loads on mount. Login has never returned anything
+    // beyond username and role, so without this, a page reload had no way to
+    // know an account's email or notification preferences at all - the fields
+    // this controller can save were never anywhere the frontend could read them
+    // back from, "reset on reload" was really "never loaded".
+    [HttpGet]
+    public IActionResult GetMe()
+    {
+        var id = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var user = _context.Users.Find(id);
+        if (user == null) return NotFound(new { Message = "User not found." });
+
+        return Ok(new
+        {
+            Username = user.Username,
+            Email = user.Email,
+            NotifyLowStock = user.NotifyLowStock,
+            NotifyDailySummary = user.NotifyDailySummary
+        });
+    }
+
     [HttpPatch]
     public IActionResult UpdateMe([FromBody] UpdateMeRequest request)
     {
@@ -42,6 +63,8 @@ public class UserProfileController : ControllerBase
 
         user.Username = username;
         user.Email = request.Email?.Trim() ?? string.Empty;
+        user.NotifyLowStock = request.NotifyLowStock;
+        user.NotifyDailySummary = request.NotifyDailySummary;
 
         try
         {
@@ -60,7 +83,9 @@ public class UserProfileController : ControllerBase
         {
             Message = "Profile updated successfully.",
             Username = user.Username,
-            Email = user.Email
+            Email = user.Email,
+            NotifyLowStock = user.NotifyLowStock,
+            NotifyDailySummary = user.NotifyDailySummary
         });
     }
 
@@ -102,6 +127,13 @@ public class UpdateMeRequest
     [EmailAddress(ErrorMessage = "Enter a valid email address.")]
     [StringLength(255, ErrorMessage = "Email cannot be longer than 255 characters.")]
     public string? Email { get; set; }
+
+    // The Settings page's two notification toggles. This endpoint replaces the
+    // whole profile the way it already does for Username and Email, so these
+    // are read the same way - whatever the caller currently has switched on -
+    // rather than treated as an optional partial update.
+    public bool NotifyLowStock { get; set; }
+    public bool NotifyDailySummary { get; set; }
 }
 
 public class ChangePasswordRequest

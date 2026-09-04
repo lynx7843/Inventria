@@ -89,4 +89,61 @@ public class UserProfileTests
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
+
+    // --- NOTIFICATION PREFERENCES --------------------------------------------
+
+    [Fact]
+    public void A_freshly_created_account_defaults_to_low_stock_on_and_daily_summary_off()
+    {
+        using var db = new TestDatabase();
+        var alice = AddAccount(db, "alice");
+
+        var result = ControllerFor(db, alice).GetMe();
+        var body = ApiResult.Body(result);
+
+        // Matches what the Settings page already showed everyone before these
+        // columns existed - a migration that flipped an existing account's
+        // subscriptions would be a surprise, not a preference.
+        Assert.True(ApiResult.Property(body, "NotifyLowStock").GetBoolean());
+        Assert.False(ApiResult.Property(body, "NotifyDailySummary").GetBoolean());
+    }
+
+    [Fact]
+    public void Updating_the_profile_persists_both_notification_toggles()
+    {
+        using var db = new TestDatabase();
+        var alice = AddAccount(db, "alice");
+
+        var result = ControllerFor(db, alice).UpdateMe(new UpdateMeRequest
+        {
+            Username = "alice",
+            Email = "alice@example.com",
+            NotifyLowStock = false,
+            NotifyDailySummary = true
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.False(ApiResult.Property(ApiResult.Body(result), "NotifyLowStock").GetBoolean());
+        Assert.True(ApiResult.Property(ApiResult.Body(result), "NotifyDailySummary").GetBoolean());
+
+        using var check = db.NewContext();
+        var stored = check.Users.Single();
+
+        // Not just the response - the point is that a reload can read this back,
+        // which means it has to actually be in the row.
+        Assert.False(stored.NotifyLowStock);
+        Assert.True(stored.NotifyDailySummary);
+    }
+
+    [Fact]
+    public void Getting_the_profile_for_an_account_that_no_longer_exists_is_a_not_found()
+    {
+        using var db = new TestDatabase();
+        var controller = new UserProfileController(db.Context)
+        {
+            ControllerContext = ApiResult.SignedInAs("ghost", id: 999)
+        };
+
+        Assert.IsType<NotFoundObjectResult>(controller.GetMe());
+    }
 }
