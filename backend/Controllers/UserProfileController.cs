@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Inventria.Models;
+using BCrypt.Net;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 
@@ -62,6 +63,33 @@ public class UserProfileController : ControllerBase
             Email = user.Email
         });
     }
+
+    // Until now the only way to change a password was an Admin overwriting it
+    // from the Users screen - which means the Admin chose it, so no password on
+    // the system was actually private to the person using it. This is the other
+    // path: the account holder changing their own.
+    [HttpPost("password")]
+    public IActionResult ChangePassword([FromBody] ChangePasswordRequest request)
+    {
+        var id = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var user = _context.Users.Find(id);
+        if (user == null) return NotFound(new { Message = "User not found." });
+
+        // The one check this endpoint exists to enforce. Skipping it would let
+        // whoever holds the session cookie - not necessarily the account's owner
+        // - set a new password with no proof they knew the old one, turning a
+        // stolen cookie into a permanent takeover instead of a session that
+        // expires.
+        if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.Password))
+        {
+            return BadRequest(new { Message = "Current password is incorrect." });
+        }
+
+        user.Password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        _context.SaveChanges();
+
+        return Ok(new { Message = "Password changed successfully." });
+    }
 }
 
 public class UpdateMeRequest
@@ -74,4 +102,17 @@ public class UpdateMeRequest
     [EmailAddress(ErrorMessage = "Enter a valid email address.")]
     [StringLength(255, ErrorMessage = "Email cannot be longer than 255 characters.")]
     public string? Email { get; set; }
+}
+
+public class ChangePasswordRequest
+{
+    [NotBlank(ErrorMessage = "Current password is required.")]
+    public string CurrentPassword { get; set; } = string.Empty;
+
+    // Same cap UserRequest.Password documents: BCrypt hashes only the first 72
+    // bytes, so anything longer is a password whose tail does not actually
+    // protect the account.
+    [NotBlank(ErrorMessage = "New password is required.")]
+    [StringLength(72, ErrorMessage = "Password cannot be longer than 72 characters.")]
+    public string NewPassword { get; set; } = string.Empty;
 }

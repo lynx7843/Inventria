@@ -54,12 +54,18 @@ public static class ApiResult
     /// <summary>
     /// The controller context a signed-in caller arrives with. Movements are
     /// stamped with the name on the token, so an action that writes one needs a
-    /// principal to read it from.
+    /// principal to read it from; UserProfileController resolves the caller from
+    /// the NameIdentifier claim the same way, which is why one is always present
+    /// here rather than only where a test happens to need it.
     /// </summary>
-    public static ControllerContext SignedInAs(string username, string role = "Employee")
+    public static ControllerContext SignedInAs(string username, string role = "Employee", int id = 1)
     {
         var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, username), new Claim(ClaimTypes.Role, role)],
+            [
+                new Claim(ClaimTypes.Name, username),
+                new Claim(ClaimTypes.Role, role),
+                new Claim(ClaimTypes.NameIdentifier, id.ToString())
+            ],
             authenticationType: "Test");
 
         return new ControllerContext
