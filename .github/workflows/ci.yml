@@ -50,10 +50,14 @@ jobs:
       # The suite needs no SQL Server: TestDatabase builds each case a real
       # relational database in memory with SQLite, so there is no service
       # container to start and nothing to wait on.
+      # `--collect:"XPlat Code Coverage"` invokes coverlet.collector (already a
+      # test-project dependency) and drops a Cobertura file per test assembly
+      # under TestResults/<guid>/coverage.cobertura.xml.
       - name: Test
         run: >
           dotnet test Inventria.sln --no-build -c Release
           --logger "trx;LogFileName=results.trx"
+          --collect:"XPlat Code Coverage"
           --results-directory ${{ github.workspace }}/TestResults
 
       # `always()` so a failing run still uploads the results that explain it.
@@ -63,6 +67,17 @@ jobs:
         with:
           name: backend-test-results
           path: ${{ github.workspace }}/TestResults/*.trx
+          if-no-files-found: warn
+
+      # Coverage lives one directory deeper than the .trx files, so it needs
+      # its own glob. No Codecov or similar upload - the artifact alone is
+      # enough to inspect coverage without a third-party account.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: ${{ github.workspace }}/TestResults/**/coverage.cobertura.xml
           if-no-files-found: warn
 
   migrations:
