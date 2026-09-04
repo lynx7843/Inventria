@@ -24,6 +24,14 @@
 	let notifyLowStock = $state(true);
 	let notifyDailySummary = $state(false);
 
+	let showPasswordForm = $state(false);
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	let confirmPassword = $state('');
+	let passwordError = $state('');
+	let passwordSuccess = $state('');
+	let changingPassword = $state(false);
+
 	onMount(() => {
 		if (!requireSession()) return;
 		allowed = true;
@@ -71,6 +79,70 @@
 			errorMsg = 'A network error occurred while saving.';
 		} finally {
 			saving = false;
+		}
+	}
+
+	function togglePasswordForm() {
+		showPasswordForm = !showPasswordForm;
+		passwordError = '';
+		passwordSuccess = '';
+		currentPassword = '';
+		newPassword = '';
+		confirmPassword = '';
+	}
+
+	async function changePassword() {
+		passwordError = '';
+		passwordSuccess = '';
+
+		if (!currentPassword || !newPassword) {
+			passwordError = 'Enter your current password and a new one.';
+			return;
+		}
+
+		// The server enforces this too - BCrypt hashes only the first 72 bytes of
+		// whatever it is given, so anything past that does not actually protect
+		// the account - but catching it here saves a round trip for the mistake.
+		if (newPassword.length > 72) {
+			passwordError = 'New password cannot be longer than 72 characters.';
+			return;
+		}
+
+		if (newPassword !== confirmPassword) {
+			passwordError = 'New password and confirmation do not match.';
+			return;
+		}
+
+		changingPassword = true;
+
+		try {
+			const res = await apiFetch('/api/users/me/password', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ currentPassword, newPassword })
+			});
+
+			if (res.ok) {
+				passwordSuccess = 'Password changed successfully.';
+				currentPassword = '';
+				newPassword = '';
+				confirmPassword = '';
+				return;
+			}
+
+			if (res.status === 401) {
+				endExpiredSession();
+				return;
+			}
+
+			// Wrong current password, or a new one that failed validation - the
+			// server says which.
+			passwordError = await apiErrorMessage(res, 'Failed to change password.');
+		} catch (err) {
+			console.error(err);
+			passwordError = 'A network error occurred while changing your password.';
+		} finally {
+			changingPassword = false;
 		}
 	}
 </script>
@@ -154,7 +226,12 @@
 					<h3 class="panel-title">Security</h3>
 					<hr class="divider" />
 					<div class="sec-items">
-						<div class="sec-row static">
+						<button
+							class="sec-row"
+							type="button"
+							aria-expanded={showPasswordForm}
+							onclick={togglePasswordForm}
+						>
 							<div class="sec-icon">
 								<svg
 									width="17"
@@ -172,8 +249,86 @@
 								<span class="sec-label">Change Password</span>
 								<span class="sec-sub">Update the password on your account</span>
 							</div>
-							<span class="tag">SOON</span>
-						</div>
+							<span class="chevron" class:open={showPasswordForm}>
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="#94a3b8"
+									stroke-width="2.5"><polyline points="6 9 12 15 18 9" /></svg
+								>
+							</span>
+						</button>
+
+						{#if showPasswordForm}
+							<form
+								class="password-form"
+								onsubmit={(e) => {
+									e.preventDefault();
+									changePassword();
+								}}
+							>
+								<div class="field-wrap">
+									<label class="field-label" for="currentPassword">Current Password</label>
+									<input
+										id="currentPassword"
+										class="field-input"
+										type="password"
+										autocomplete="current-password"
+										bind:value={currentPassword}
+									/>
+								</div>
+								<div class="field-wrap">
+									<label class="field-label" for="newPassword">New Password</label>
+									<input
+										id="newPassword"
+										class="field-input"
+										type="password"
+										autocomplete="new-password"
+										maxlength="72"
+										bind:value={newPassword}
+									/>
+								</div>
+								<div class="field-wrap">
+									<label class="field-label" for="confirmPassword">Confirm New Password</label>
+									<input
+										id="confirmPassword"
+										class="field-input"
+										type="password"
+										autocomplete="new-password"
+										maxlength="72"
+										bind:value={confirmPassword}
+									/>
+								</div>
+
+								{#if passwordError}
+									<span class="save-error">{passwordError}</span>
+								{/if}
+								{#if passwordSuccess}
+									<span class="save-flash">
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="#1a6b3c"
+											stroke-width="2.5"><polyline points="20 6 9 17 4 12" /></svg
+										>
+										{passwordSuccess}
+									</span>
+								{/if}
+
+								<div class="password-form-actions">
+									<button type="button" class="cancel-btn" onclick={togglePasswordForm}
+										>Cancel</button
+									>
+									<button type="submit" class="save-btn" disabled={changingPassword}>
+										{changingPassword ? 'Saving…' : 'Update Password'}
+									</button>
+								</div>
+							</form>
+						{/if}
 
 						<div class="sec-row static">
 							<div class="sec-icon">
@@ -431,9 +586,51 @@
 		background: white;
 		text-align: left;
 		font-family: inherit;
+		width: 100%;
+		cursor: pointer;
 	}
 	.sec-row.static {
 		cursor: default;
+	}
+	button.sec-row:hover {
+		border-color: #cbd5e1;
+	}
+	.chevron {
+		display: flex;
+		flex-shrink: 0;
+		transition: transform 0.15s;
+	}
+	.chevron.open {
+		transform: rotate(180deg);
+	}
+
+	.password-form {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		padding: 1rem;
+		border: 1.5px dashed #e2e8f0;
+		border-radius: 8px;
+		margin-top: -0.2rem;
+	}
+	.password-form-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.75rem;
+	}
+	.cancel-btn {
+		padding: 0.6rem 1.2rem;
+		background: white;
+		color: #475569;
+		border: 1.5px solid #cbd5e1;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.cancel-btn:hover {
+		background: #f1f5f9;
 	}
 	.sec-icon {
 		width: 34px;
