@@ -177,6 +177,37 @@
 	function closeForm() {
 		showForm = false;
 	}
+
+	// The table already holds everything this exports - one page of the
+	// catalogue - so this is a Blob the browser writes itself: no endpoint, no
+	// round trip, and nothing beyond what the table already shows.
+	function exportCsv() {
+		const rows = [
+			['ID', 'SKU', 'Item Name', 'Category', 'Quantity On Hand'],
+			...items.map((item) => [
+				String(item.id),
+				item.sku,
+				item.name,
+				item.category,
+				String(item.quantityOnHand)
+			])
+		];
+
+		// Anything holding a quote, comma or newline has to be quoted, with inner
+		// quotes doubled - a product name is free text, so this is not hypothetical.
+		const csv = rows
+			.map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(','))
+			.join('\r\n');
+
+		const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+		const link = document.createElement('a');
+
+		link.href = url;
+		link.download = `inventria-inventory-page-${page}-${new Date().toISOString().slice(0, 10)}.csv`;
+		link.click();
+
+		URL.revokeObjectURL(url);
+	}
 </script>
 
 {#if allowed}
@@ -189,9 +220,14 @@
 				<h2>Master Inventory</h2>
 				<p>Manage product definitions, SKUs, and categories.</p>
 			</div>
-			{#if !showForm}
-				<button class="btn-solid" onclick={openNewForm}>+ Add New SKU</button>
-			{/if}
+			<div class="actions">
+				<button class="btn-outline" onclick={exportCsv} disabled={items.length === 0}
+					>Export CSV</button
+				>
+				{#if !showForm}
+					<button class="btn-solid" onclick={openNewForm}>+ Add New SKU</button>
+				{/if}
+			</div>
 		</div>
 
 		{#if errorMsg}
