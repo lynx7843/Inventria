@@ -100,6 +100,16 @@ public class InventriaDbContext : DbContext
         {
             user.Property(u => u.Username).HasMaxLength(100);
             user.HasIndex(u => u.Username).IsUnique();
+
+            // A bare C# property initializer only sets what a newly constructed
+            // User looks like in memory - EF Core infers a column default from
+            // the CLR default of the type (false) unless told otherwise, which
+            // would give every row added by this migration NotifyLowStock = false
+            // regardless of what the property declares. Spelled out here so the
+            // column - and the next `has-pending-model-changes` check - agree
+            // with it.
+            user.Property(u => u.NotifyLowStock).HasDefaultValue(true);
+            user.Property(u => u.NotifyDailySummary).HasDefaultValue(false);
         });
 
         // A SKU is the code people scan and search by, so duplicates make the
