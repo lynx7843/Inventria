@@ -1,5 +1,4 @@
-import { apiFetch, apiErrorMessage } from '$lib/api';
-import { endExpiredSession } from '$lib/auth';
+import { getJson } from '$lib/api';
 
 /** A master item, as `GET /api/inventory` returns it. */
 export type Item = {
@@ -53,22 +52,6 @@ export function itemLabel(item: Item): string {
 export function parseUnits(value: unknown): number | null {
 	const units = Number(value);
 	return Number.isInteger(units) && units > 0 ? units : null;
-}
-
-async function getJson<T>(path: string, what: string): Promise<T> {
-	const res = await apiFetch(path);
-
-	if (res.status === 401) {
-		// The session is gone. Clearing it matters: the route guards read the
-		// stored role, so leaving it behind waves the visitor back onto a page
-		// whose every request now fails.
-		endExpiredSession();
-		throw new Error('Your session has expired.');
-	}
-
-	if (!res.ok) throw new Error(await apiErrorMessage(res, `Failed to load ${what}.`));
-
-	return res.json();
 }
 
 /** One page of items, as `GET /api/inventory` returns it. */

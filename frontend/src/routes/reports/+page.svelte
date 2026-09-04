@@ -1,104 +1,324 @@
 <script lang="ts">
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
+	import SelectField from '$lib/components/shared/SelectField.svelte';
 	import { onMount } from 'svelte';
 	import { requireSession } from '$lib/auth';
-	import { fetchAllItems, type Item } from '$lib/inventory';
+	import { fetchAllItems, fetchBins, itemLabel, type Option } from '$lib/inventory';
+	import {
+		fetchStockOnHand,
+		fetchMovements,
+		fetchDeadStock,
+		fetchVelocity,
+		type StockOnHandRow,
+		type MovementRow,
+		type DeadStockRow,
+		type VelocityRow
+	} from '$lib/reports';
 
 	// Open to anyone signed in, same as Inventory and Bins - reports on the
 	// catalogue aren't an Admin secret.
 	let allowed = $state(false);
 
-	let items: Item[] = $state([]);
-	let isLoading = $state(true);
-	let errorMsg = $state('');
+	type Tab = 'stock' | 'movements' | 'dead-stock' | 'velocity';
+	let activeTab: Tab = $state('stock');
 
-	// The report reads the whole catalogue rather than one page of it, so every
-	// figure below - the totals, the category split, the table - reflects all
-	// of it and not just whatever page loaded first.
-	let searchTerm = $state('');
-	let categoryFilter = $state('All');
+	const PAGE_SIZE = 15;
 
-	const pageSize = 10;
-	let page = $state(1);
+	// What the dropdown filters offer. Built once from the catalogue and the
+	// warehouse map rather than from whatever page of a report happens to have
+	// loaded, so a category or bin with nothing currently on hand still shows
+	// up as something you can filter by.
+	type Choice = { value: string; label: string };
+	let categoryOptions: Choice[] = $state([]);
+	let zoneOptions: Choice[] = $state([]);
+	let itemOptions: Option[] = $state([]);
+	let isLoadingOptions = $state(true);
 
-	onMount(async () => {
+	async function loadFilterOptions() {
+		try {
+			const [items, bins] = await Promise.all([fetchAllItems(), fetchBins()]);
+			categoryOptions = Array.from(new Set(items.map((i) => i.category)))
+				.sort()
+				.map((c) => ({ value: c, label: c }));
+			zoneOptions = Array.from(new Set(bins.map((b) => b.zone)))
+				.sort()
+				.map((z) => ({ value: z, label: z }));
+			itemOptions = items.map((item) => ({ value: item.id, label: itemLabel(item) }));
+		} catch {
+			// The report tables below still work with free-typed filters absent -
+			// only these three dropdowns come up empty, and each degrades to its
+			// "no options yet" label rather than blocking the page.
+		} finally {
+			isLoadingOptions = false;
+		}
+	}
+
+	// --- STOCK ON HAND -------------------------------------------------------
+
+	let stockCategory = $state('');
+	let stockZone = $state('');
+	let stockPage = $state(1);
+	let stockRows: StockOnHandRow[] = $state([]);
+	let stockTotalPages = $state(1);
+	let stockTotalCount = $state(0);
+	let stockTotalUnits = $state(0);
+	let stockLoading = $state(true);
+	let stockError = $state('');
+
+	async function loadStockOnHand() {
+		stockLoading = true;
+		stockError = '';
+		try {
+			const result = await fetchStockOnHand({
+				category: stockCategory,
+				zone: stockZone,
+				page: stockPage,
+				pageSize: PAGE_SIZE
+			});
+			stockRows = result.items;
+			stockTotalPages = result.totalPages;
+			stockTotalCount = result.totalCount;
+			stockTotalUnits = result.totalUnits;
+		} catch (err) {
+			stockError = err instanceof Error ? err.message : 'Failed to load stock on hand.';
+		} finally {
+			stockLoading = false;
+		}
+	}
+
+	function applyStockFilters(e: Event) {
+		e.preventDefault();
+		stockPage = 1;
+		loadStockOnHand();
+	}
+
+	function goToStockPage(next: number) {
+		if (next < 1 || next > stockTotalPages || next === stockPage) return;
+		stockPage = next;
+		loadStockOnHand();
+	}
+
+	// --- MOVEMENTS -------------------------------------------------------------
+
+	let movementType = $state('');
+	let movementItemId = $state('');
+	let movementPerformedBy = $state('');
+	let movementFrom = $state('');
+	let movementTo = $state('');
+	let movementPage = $state(1);
+	let movementRows: MovementRow[] = $state([]);
+	let movementTotalPages = $state(1);
+	let movementTotalCount = $state(0);
+	let movementLoading = $state(true);
+	let movementError = $state('');
+
+	async function loadMovements() {
+		movementLoading = true;
+		movementError = '';
+		try {
+			const result = await fetchMovements({
+				type: movementType,
+				itemId: movementItemId ? Number(movementItemId) : undefined,
+				performedBy: movementPerformedBy,
+				from: movementFrom,
+				to: movementTo,
+				page: movementPage,
+				pageSize: PAGE_SIZE
+			});
+			movementRows = result.items;
+			movementTotalPages = result.totalPages;
+			movementTotalCount = result.totalCount;
+		} catch (err) {
+			movementError = err instanceof Error ? err.message : 'Failed to load movements.';
+		} finally {
+			movementLoading = false;
+		}
+	}
+
+	function applyMovementFilters(e: Event) {
+		e.preventDefault();
+		movementPage = 1;
+		loadMovements();
+	}
+
+	function goToMovementPage(next: number) {
+		if (next < 1 || next > movementTotalPages || next === movementPage) return;
+		movementPage = next;
+		loadMovements();
+	}
+
+	// --- DEAD STOCK --------------------------------------------------------------
+
+	let deadStockDays = $state('90');
+	let deadStockPage = $state(1);
+	let deadStockRows: DeadStockRow[] = $state([]);
+	let deadStockTotalPages = $state(1);
+	let deadStockTotalCount = $state(0);
+	let deadStockLoading = $state(true);
+	let deadStockError = $state('');
+
+	async function loadDeadStock() {
+		deadStockLoading = true;
+		deadStockError = '';
+		try {
+			const days = Number(deadStockDays);
+			const result = await fetchDeadStock({
+				days: Number.isInteger(days) && days > 0 ? days : 90,
+				page: deadStockPage,
+				pageSize: PAGE_SIZE
+			});
+			deadStockRows = result.items;
+			deadStockTotalPages = result.totalPages;
+			deadStockTotalCount = result.totalCount;
+			deadStockDays = String(result.days);
+		} catch (err) {
+			deadStockError = err instanceof Error ? err.message : 'Failed to load dead stock.';
+		} finally {
+			deadStockLoading = false;
+		}
+	}
+
+	function applyDeadStockFilters(e: Event) {
+		e.preventDefault();
+		deadStockPage = 1;
+		loadDeadStock();
+	}
+
+	function goToDeadStockPage(next: number) {
+		if (next < 1 || next > deadStockTotalPages || next === deadStockPage) return;
+		deadStockPage = next;
+		loadDeadStock();
+	}
+
+	// --- VELOCITY ------------------------------------------------------------------
+
+	let velocityDays = $state('30');
+	let velocityPage = $state(1);
+	let velocityRows: VelocityRow[] = $state([]);
+	let velocityTotalPages = $state(1);
+	let velocityTotalCount = $state(0);
+	let velocityLoading = $state(true);
+	let velocityError = $state('');
+
+	async function loadVelocity() {
+		velocityLoading = true;
+		velocityError = '';
+		try {
+			const days = Number(velocityDays);
+			const result = await fetchVelocity({
+				days: Number.isInteger(days) && days > 0 ? days : 30,
+				page: velocityPage,
+				pageSize: PAGE_SIZE
+			});
+			velocityRows = result.items;
+			velocityTotalPages = result.totalPages;
+			velocityTotalCount = result.totalCount;
+			velocityDays = String(result.days);
+		} catch (err) {
+			velocityError = err instanceof Error ? err.message : 'Failed to load velocity.';
+		} finally {
+			velocityLoading = false;
+		}
+	}
+
+	function applyVelocityFilters(e: Event) {
+		e.preventDefault();
+		velocityPage = 1;
+		loadVelocity();
+	}
+
+	function goToVelocityPage(next: number) {
+		if (next < 1 || next > velocityTotalPages || next === velocityPage) return;
+		velocityPage = next;
+		loadVelocity();
+	}
+
+	onMount(() => {
 		if (!requireSession()) return;
 		allowed = true;
 
-		try {
-			items = await fetchAllItems();
-		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Unknown error occurred.';
-		} finally {
-			isLoading = false;
-		}
+		// All four reports load up front rather than one tab at a time: each is
+		// one page of up to 15 rows, so the cost of loading all of them is the
+		// cost of loading one - and switching tabs then never shows a spinner
+		// for data that was already a click away.
+		loadFilterOptions();
+		loadStockOnHand();
+		loadMovements();
+		loadDeadStock();
+		loadVelocity();
 	});
 
-	// Every number on this page is derived from the fetched items - nothing here
-	// is invented. There's no reorder level anywhere in the schema, so "out of
-	// stock" (quantityOnHand === 0) is the only stock-health figure that can
-	// honestly be reported without one.
-	let totalUnits = $derived(items.reduce((sum, item) => sum + item.quantityOnHand, 0));
-	let outOfStockCount = $derived(items.filter((item) => item.quantityOnHand === 0).length);
-	let categories = $derived(Array.from(new Set(items.map((item) => item.category))).sort());
-
-	type CategoryCount = { category: string; count: number; units: number };
-	let categoryBreakdown = $derived<CategoryCount[]>(
-		categories
-			.map((category) => {
-				const inCategory = items.filter((item) => item.category === category);
-				return {
-					category,
-					count: inCategory.length,
-					units: inCategory.reduce((sum, item) => sum + item.quantityOnHand, 0)
-				};
-			})
-			.sort((a, b) => b.units - a.units)
-	);
-
-	let filteredItems = $derived(
-		items.filter((item) => {
-			const matchesCategory = categoryFilter === 'All' || item.category === categoryFilter;
-			const term = searchTerm.trim().toLowerCase();
-			const matchesSearch =
-				term === '' ||
-				item.name.toLowerCase().includes(term) ||
-				item.sku.toLowerCase().includes(term);
-			return matchesCategory && matchesSearch;
-		})
-	);
-
-	// Filtering changes the result set out from under whatever page you were on;
-	// rather than leaving you stranded on a now-empty page 4, snap back to 1.
-	$effect(() => {
-		void filteredItems;
-		page = 1;
-	});
-
-	let totalPages = $derived(Math.max(1, Math.ceil(filteredItems.length / pageSize)));
-	let pagedItems = $derived(filteredItems.slice((page - 1) * pageSize, page * pageSize));
-
-	function goToPage(next: number) {
-		if (next < 1 || next > totalPages) return;
-		page = next;
+	function formatTimestamp(iso: string): string {
+		return new Date(iso).toLocaleString();
 	}
 
-	// Exports exactly what's on screen - the filtered set, not the whole
-	// catalogue - so the file matches what you were just looking at.
-	function exportCsv() {
-		const rows = [
-			['SKU', 'Name', 'Category', 'Quantity On Hand', 'Status'],
-			...filteredItems.map((item) => [
-				item.sku,
-				item.name,
-				item.category,
-				String(item.quantityOnHand),
-				item.quantityOnHand === 0 ? 'Out of Stock' : 'In Stock'
-			])
-		];
+	function formatDate(iso: string | null): string {
+		return iso ? new Date(iso).toLocaleDateString() : 'Never';
+	}
 
-		const csv = rows
+	function movementTypeClass(type: string): string {
+		if (type === 'RECEIVE') return 'in';
+		if (type === 'PICK') return 'out';
+		return 'move';
+	}
+
+	// Exports what is currently on screen for the active tab - one page of a
+	// report someone is already looking at, not the whole report re-fetched a
+	// page at a time. The point is a file that matches what was just reviewed.
+	function exportCsv() {
+		let headers: string[];
+		let rows: string[][];
+		let filename: string;
+
+		if (activeTab === 'stock') {
+			headers = ['Item Name', 'SKU', 'Category', 'Zone', 'Aisle', 'Shelf', 'Quantity'];
+			rows = stockRows.map((r) => [
+				r.name,
+				r.sku,
+				r.category,
+				r.zone,
+				r.aisle,
+				r.shelf,
+				String(r.quantity)
+			]);
+			filename = 'stock-on-hand';
+		} else if (activeTab === 'movements') {
+			headers = ['Timestamp', 'Item', 'SKU', 'Type', 'Quantity Changed', 'Bin', 'Performed By'];
+			rows = movementRows.map((r) => [
+				formatTimestamp(r.timestamp),
+				r.itemName,
+				r.sku ?? '',
+				r.transactionType,
+				String(r.quantityChanged),
+				r.zone ? `${r.zone}-${r.aisle}-${r.shelf}` : '',
+				r.performedBy
+			]);
+			filename = 'stock-movements';
+		} else if (activeTab === 'dead-stock') {
+			headers = ['Item Name', 'SKU', 'Category', 'Quantity On Hand', 'Last Movement'];
+			rows = deadStockRows.map((r) => [
+				r.name,
+				r.sku,
+				r.category,
+				String(r.quantityOnHand),
+				formatDate(r.lastMovementAt)
+			]);
+			filename = 'dead-stock';
+		} else {
+			headers = ['Item Name', 'SKU', 'Category', 'Units In', 'Units Out', 'Net Change'];
+			rows = velocityRows.map((r) => [
+				r.name,
+				r.sku,
+				r.category,
+				String(r.unitsIn),
+				String(r.unitsOut),
+				String(r.netChange)
+			]);
+			filename = 'velocity';
+		}
+
+		const csv = [headers, ...rows]
 			.map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(','))
 			.join('\r\n');
 
@@ -106,7 +326,7 @@
 		const link = document.createElement('a');
 
 		link.href = url;
-		link.download = `inventria-stock-report-${new Date().toISOString().slice(0, 10)}.csv`;
+		link.download = `inventria-${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
 		link.click();
 
 		URL.revokeObjectURL(url);
@@ -121,151 +341,417 @@
 		<div class="page-header">
 			<div>
 				<h2>Reports</h2>
-				<p>
-					A snapshot of the current catalogue - stock levels, categories, and status at a glance.
-				</p>
+				<p>Stock on hand, the movement ledger, dead stock, and reorder velocity.</p>
 			</div>
 			<div class="actions">
-				<button class="btn-outline" onclick={exportCsv} disabled={filteredItems.length === 0}
-					>Export CSV</button
-				>
+				<button class="btn-outline" onclick={exportCsv}>Export CSV</button>
 				<button class="btn-solid" onclick={() => window.print()}>Print Report</button>
 			</div>
 		</div>
 
-		<div class="stats-grid">
-			<div class="stat-card">
-				<h4>TOTAL SKUS</h4>
-				<div class="value">{items.length.toLocaleString()}</div>
-				<p class="subtext">Distinct items tracked</p>
-			</div>
-			<div class="stat-card">
-				<h4>TOTAL UNITS ON HAND</h4>
-				<div class="value">{totalUnits.toLocaleString()}</div>
-				<p class="subtext">Across every bin</p>
-			</div>
-			<div class="stat-card">
-				<h4>OUT OF STOCK</h4>
-				<div class="value" class:critical={outOfStockCount > 0}>
-					{outOfStockCount.toLocaleString()}
-				</div>
-				<p class="subtext">SKUs at zero units</p>
-			</div>
-			<div class="stat-card categories-card">
-				<h4>CATEGORIES</h4>
-				<div class="value text-white">{categories.length}</div>
-				<p class="text-white">Distinct categories in the catalogue</p>
-			</div>
+		<div class="tabs">
+			<button
+				class="tab"
+				class:active={activeTab === 'stock'}
+				onclick={() => (activeTab = 'stock')}
+			>
+				Stock on Hand
+			</button>
+			<button
+				class="tab"
+				class:active={activeTab === 'movements'}
+				onclick={() => (activeTab = 'movements')}
+			>
+				Movements
+			</button>
+			<button
+				class="tab"
+				class:active={activeTab === 'dead-stock'}
+				onclick={() => (activeTab = 'dead-stock')}
+			>
+				Dead Stock
+			</button>
+			<button
+				class="tab"
+				class:active={activeTab === 'velocity'}
+				onclick={() => (activeTab = 'velocity')}
+			>
+				Velocity
+			</button>
 		</div>
 
-		<div class="panel">
-			<div class="panel-header">
-				<h3>Stock by Category</h3>
-			</div>
-			{#if isLoading}
-				<p class="empty-state">Loading report data...</p>
-			{:else if categoryBreakdown.length === 0}
-				<p class="empty-state">No items found in the master list.</p>
-			{:else}
-				<div class="category-list">
-					{#each categoryBreakdown as row (row.category)}
-						<div class="category-row">
-							<div class="category-label">
-								<span>{row.category}</span>
-								<span class="sub"
-									>{row.count} SKU{row.count === 1 ? '' : 's'} &middot; {row.units.toLocaleString()} units</span
-								>
-							</div>
-							<div class="bar-track">
-								<div
-									class="bar-fill"
-									style="width: {totalUnits === 0
-										? 0
-										: Math.round((row.units / totalUnits) * 100)}%"
-								></div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
-		<div class="panel mt-1">
-			<div class="panel-header">
-				<h3>Inventory Report</h3>
-				<div class="filters">
-					<input
-						class="search-input"
-						type="text"
-						placeholder="Search by name or SKU..."
-						bind:value={searchTerm}
-					/>
-					<select class="category-select" bind:value={categoryFilter}>
-						<option value="All">All Categories</option>
-						{#each categories as category (category)}
-							<option value={category}>{category}</option>
-						{/each}
-					</select>
-				</div>
-			</div>
-
-			<table class="data-table">
-				<thead>
-					<tr>
-						<th>ITEM NAME</th>
-						<th>SKU</th>
-						<th>CATEGORY</th>
-						<th>QUANTITY</th>
-						<th>STATUS</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#if isLoading}
-						<tr><td colspan="5" class="empty-state">Loading inventory database...</td></tr>
-					{:else if errorMsg}
-						<tr><td colspan="5" class="empty-state error">{errorMsg}</td></tr>
-					{:else if pagedItems.length === 0}
-						<tr><td colspan="5" class="empty-state">No items match your search.</td></tr>
-					{:else}
-						{#each pagedItems as item (item.id)}
-							<tr>
-								<td><strong>{item.name}</strong></td>
-								<td>{item.sku}</td>
-								<td>{item.category}</td>
-								<td>{item.quantityOnHand.toLocaleString()}</td>
-								<td>
-									{#if item.quantityOnHand > 0}
-										<span class="badge in-stock">IN STOCK</span>
-									{:else}
-										<span class="badge out-stock">OUT OF STOCK</span>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					{/if}
-				</tbody>
-			</table>
-
-			{#if filteredItems.length > 0}
-				<div class="pager">
-					<span class="pager-status">
-						Showing {pagedItems.length} of {filteredItems.length} item{filteredItems.length === 1
-							? ''
-							: 's'} &middot; page {page} of {totalPages}
-					</span>
-					<div class="pager-buttons">
-						<button class="pager-btn" onclick={() => goToPage(page - 1)} disabled={page <= 1}
-							>Previous</button
-						>
-						<button
-							class="pager-btn"
-							onclick={() => goToPage(page + 1)}
-							disabled={page >= totalPages}>Next</button
-						>
+		<!-- STOCK ON HAND -->
+		{#if activeTab === 'stock'}
+			<div class="panel">
+				<form class="filters" onsubmit={applyStockFilters}>
+					<div class="select-wrap">
+						<SelectField
+							id="stock-category"
+							label="CATEGORY"
+							options={categoryOptions}
+							bind:value={stockCategory}
+							placeholder="All categories"
+							emptyLabel={isLoadingOptions ? 'Loading...' : 'No categories yet'}
+						/>
 					</div>
-				</div>
-			{/if}
-		</div>
+					<div class="select-wrap">
+						<SelectField
+							id="stock-zone"
+							label="ZONE"
+							options={zoneOptions}
+							bind:value={stockZone}
+							placeholder="All zones"
+							emptyLabel={isLoadingOptions ? 'Loading...' : 'No zones yet'}
+						/>
+					</div>
+					<button type="submit" class="btn-solid filter-btn">Apply Filters</button>
+					{#if stockCategory || stockZone}
+						<button
+							type="button"
+							class="btn-outline filter-btn"
+							onclick={() => {
+								stockCategory = '';
+								stockZone = '';
+								stockPage = 1;
+								loadStockOnHand();
+							}}
+						>
+							Clear
+						</button>
+					{/if}
+				</form>
+
+				{#if !stockLoading && !stockError && stockTotalCount > 0}
+					<p class="summary-line">
+						{stockTotalCount} row{stockTotalCount === 1 ? '' : 's'} matching these filters, totalling
+						{stockTotalUnits.toLocaleString()} units.
+					</p>
+				{/if}
+
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>ITEM NAME</th>
+							<th>SKU</th>
+							<th>CATEGORY</th>
+							<th>BIN</th>
+							<th>QUANTITY</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if stockLoading}
+							<tr><td colspan="5" class="empty-state">Loading stock on hand...</td></tr>
+						{:else if stockError}
+							<tr><td colspan="5" class="empty-state error">{stockError}</td></tr>
+						{:else if stockRows.length === 0}
+							<tr><td colspan="5" class="empty-state">No stock matches these filters.</td></tr>
+						{:else}
+							{#each stockRows as row (row.itemId + '-' + row.warehouseBinId)}
+								<tr>
+									<td><strong>{row.name}</strong></td>
+									<td>{row.sku}</td>
+									<td>{row.category}</td>
+									<td>{row.zone}-{row.aisle}-{row.shelf}</td>
+									<td>{row.quantity.toLocaleString()}</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+
+				{#if stockTotalCount > 0}
+					<div class="pager">
+						<span class="pager-status">
+							Page {stockPage} of {stockTotalPages}
+						</span>
+						<div class="pager-buttons">
+							<button
+								class="pager-btn"
+								onclick={() => goToStockPage(stockPage - 1)}
+								disabled={stockPage <= 1 || stockLoading}>Previous</button
+							>
+							<button
+								class="pager-btn"
+								onclick={() => goToStockPage(stockPage + 1)}
+								disabled={stockPage >= stockTotalPages || stockLoading}>Next</button
+							>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- MOVEMENTS -->
+		{#if activeTab === 'movements'}
+			<div class="panel">
+				<form class="filters" onsubmit={applyMovementFilters}>
+					<div class="select-wrap">
+						<SelectField
+							id="movement-type"
+							label="TYPE"
+							options={[
+								{ value: 'RECEIVE', label: 'Receive' },
+								{ value: 'PICK', label: 'Pick' },
+								{ value: 'RELOCATE', label: 'Relocate' }
+							]}
+							bind:value={movementType}
+							placeholder="All types"
+						/>
+					</div>
+					<div class="select-wrap">
+						<SelectField
+							id="movement-item"
+							label="ITEM"
+							options={itemOptions}
+							bind:value={movementItemId}
+							placeholder="All items"
+							emptyLabel={isLoadingOptions ? 'Loading...' : 'No items yet'}
+						/>
+					</div>
+					<div class="input-wrap">
+						<label for="movement-performed-by">PERFORMED BY</label>
+						<input id="movement-performed-by" type="text" bind:value={movementPerformedBy} />
+					</div>
+					<div class="input-wrap">
+						<label for="movement-from">FROM</label>
+						<input id="movement-from" type="date" bind:value={movementFrom} />
+					</div>
+					<div class="input-wrap">
+						<label for="movement-to">TO</label>
+						<input id="movement-to" type="date" bind:value={movementTo} />
+					</div>
+					<button type="submit" class="btn-solid filter-btn">Apply Filters</button>
+					{#if movementType || movementItemId || movementPerformedBy || movementFrom || movementTo}
+						<button
+							type="button"
+							class="btn-outline filter-btn"
+							onclick={() => {
+								movementType = '';
+								movementItemId = '';
+								movementPerformedBy = '';
+								movementFrom = '';
+								movementTo = '';
+								movementPage = 1;
+								loadMovements();
+							}}
+						>
+							Clear
+						</button>
+					{/if}
+				</form>
+
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>TIMESTAMP</th>
+							<th>ITEM</th>
+							<th>TYPE</th>
+							<th>QTY CHANGED</th>
+							<th>BIN</th>
+							<th>PERFORMED BY</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if movementLoading}
+							<tr><td colspan="6" class="empty-state">Loading movements...</td></tr>
+						{:else if movementError}
+							<tr><td colspan="6" class="empty-state error">{movementError}</td></tr>
+						{:else if movementRows.length === 0}
+							<tr><td colspan="6" class="empty-state">No movements match these filters.</td></tr>
+						{:else}
+							{#each movementRows as row (row.id)}
+								<tr>
+									<td>{formatTimestamp(row.timestamp)}</td>
+									<td>
+										<strong>{row.itemName}</strong>{#if row.sku}<span class="sub">{row.sku}</span
+											>{/if}
+									</td>
+									<td
+										><span class="badge {movementTypeClass(row.transactionType)}"
+											>{row.transactionType}</span
+										></td
+									>
+									<td
+										class:positive={row.quantityChanged > 0}
+										class:negative={row.quantityChanged < 0}
+									>
+										{row.quantityChanged > 0 ? '+' : ''}{row.quantityChanged}
+									</td>
+									<td>{row.zone ? `${row.zone}-${row.aisle}-${row.shelf}` : '—'}</td>
+									<td>{row.performedBy}</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+
+				{#if movementTotalCount > 0}
+					<div class="pager">
+						<span class="pager-status">
+							Page {movementPage} of {movementTotalPages}
+						</span>
+						<div class="pager-buttons">
+							<button
+								class="pager-btn"
+								onclick={() => goToMovementPage(movementPage - 1)}
+								disabled={movementPage <= 1 || movementLoading}>Previous</button
+							>
+							<button
+								class="pager-btn"
+								onclick={() => goToMovementPage(movementPage + 1)}
+								disabled={movementPage >= movementTotalPages || movementLoading}>Next</button
+							>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- DEAD STOCK -->
+		{#if activeTab === 'dead-stock'}
+			<div class="panel">
+				<form class="filters" onsubmit={applyDeadStockFilters}>
+					<div class="input-wrap">
+						<label for="dead-stock-days">NO MOVEMENT IN (DAYS)</label>
+						<input id="dead-stock-days" type="number" min="1" bind:value={deadStockDays} />
+					</div>
+					<button type="submit" class="btn-solid filter-btn">Apply</button>
+				</form>
+
+				<p class="summary-line">
+					Stock still on the shelf with no receive, pick, or relocation in the last {deadStockDays}
+					days.
+				</p>
+
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>ITEM NAME</th>
+							<th>SKU</th>
+							<th>CATEGORY</th>
+							<th>QUANTITY ON HAND</th>
+							<th>LAST MOVEMENT</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if deadStockLoading}
+							<tr><td colspan="5" class="empty-state">Loading dead stock...</td></tr>
+						{:else if deadStockError}
+							<tr><td colspan="5" class="empty-state error">{deadStockError}</td></tr>
+						{:else if deadStockRows.length === 0}
+							<tr
+								><td colspan="5" class="empty-state"
+									>Nothing is sitting idle - every SKU on hand has moved recently.</td
+								></tr
+							>
+						{:else}
+							{#each deadStockRows as row (row.id)}
+								<tr>
+									<td><strong>{row.name}</strong></td>
+									<td>{row.sku}</td>
+									<td>{row.category}</td>
+									<td>{row.quantityOnHand.toLocaleString()}</td>
+									<td>{formatDate(row.lastMovementAt)}</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+
+				{#if deadStockTotalCount > 0}
+					<div class="pager">
+						<span class="pager-status">
+							Page {deadStockPage} of {deadStockTotalPages}
+						</span>
+						<div class="pager-buttons">
+							<button
+								class="pager-btn"
+								onclick={() => goToDeadStockPage(deadStockPage - 1)}
+								disabled={deadStockPage <= 1 || deadStockLoading}>Previous</button
+							>
+							<button
+								class="pager-btn"
+								onclick={() => goToDeadStockPage(deadStockPage + 1)}
+								disabled={deadStockPage >= deadStockTotalPages || deadStockLoading}>Next</button
+							>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- VELOCITY -->
+		{#if activeTab === 'velocity'}
+			<div class="panel">
+				<form class="filters" onsubmit={applyVelocityFilters}>
+					<div class="input-wrap">
+						<label for="velocity-days">WINDOW (DAYS)</label>
+						<input id="velocity-days" type="number" min="1" bind:value={velocityDays} />
+					</div>
+					<button type="submit" class="btn-solid filter-btn">Apply</button>
+				</form>
+
+				<p class="summary-line">
+					Units received and picked per item over the last {velocityDays} days - fastest movers first,
+					so the slowest are what to stop reordering.
+				</p>
+
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>ITEM NAME</th>
+							<th>SKU</th>
+							<th>CATEGORY</th>
+							<th>UNITS IN</th>
+							<th>UNITS OUT</th>
+							<th>NET CHANGE</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if velocityLoading}
+							<tr><td colspan="6" class="empty-state">Loading velocity...</td></tr>
+						{:else if velocityError}
+							<tr><td colspan="6" class="empty-state error">{velocityError}</td></tr>
+						{:else if velocityRows.length === 0}
+							<tr><td colspan="6" class="empty-state">No items defined yet.</td></tr>
+						{:else}
+							{#each velocityRows as row (row.id)}
+								<tr>
+									<td><strong>{row.name}</strong></td>
+									<td>{row.sku}</td>
+									<td>{row.category}</td>
+									<td>{row.unitsIn.toLocaleString()}</td>
+									<td>{row.unitsOut.toLocaleString()}</td>
+									<td class:positive={row.netChange > 0} class:negative={row.netChange < 0}>
+										{row.netChange > 0 ? '+' : ''}{row.netChange.toLocaleString()}
+									</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+
+				{#if velocityTotalCount > 0}
+					<div class="pager">
+						<span class="pager-status">
+							Page {velocityPage} of {velocityTotalPages}
+						</span>
+						<div class="pager-buttons">
+							<button
+								class="pager-btn"
+								onclick={() => goToVelocityPage(velocityPage - 1)}
+								disabled={velocityPage <= 1 || velocityLoading}>Previous</button
+							>
+							<button
+								class="pager-btn"
+								onclick={() => goToVelocityPage(velocityPage + 1)}
+								disabled={velocityPage >= velocityTotalPages || velocityLoading}>Next</button
+							>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
 	</main>
 {/if}
 
@@ -307,10 +793,6 @@
 	.btn-outline:hover:not(:disabled) {
 		background: #f1f5f9;
 	}
-	.btn-outline:disabled {
-		color: #94a3b8;
-		cursor: not-allowed;
-	}
 	.btn-solid {
 		background: #0b6b36;
 		color: white;
@@ -324,44 +806,28 @@
 		background: #095028;
 	}
 
-	.stats-grid {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 1.5rem;
+	.tabs {
+		display: flex;
+		gap: 0.25rem;
+		border-bottom: 1px solid #e2e8f0;
 		margin-bottom: 1.5rem;
 	}
-	.stat-card {
-		background: white;
-		padding: 1.5rem;
-		border-radius: 8px;
-		border: 1px solid #e2e8f0;
-	}
-	.stat-card h4 {
-		margin: 0 0 1rem 0;
-		font-size: 0.75rem;
+	.tab {
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		padding: 0.75rem 1rem;
+		font-size: 0.9rem;
+		font-weight: 600;
 		color: #64748b;
-		letter-spacing: 0.5px;
+		cursor: pointer;
 	}
-	.stat-card .value {
-		font-size: 2rem;
-		font-weight: 700;
+	.tab:hover {
 		color: #0f172a;
-		margin-bottom: 0.5rem;
 	}
-	.stat-card .value.critical {
-		color: #dc2626;
-	}
-	.stat-card .subtext {
-		margin: 0;
-		font-size: 0.8rem;
-		color: #64748b;
-	}
-	.categories-card {
-		background: #0b6b36;
-		border-color: #0b6b36;
-	}
-	.text-white {
-		color: white !important;
+	.tab.active {
+		color: #0b6b36;
+		border-bottom-color: #0b6b36;
 	}
 
 	.panel {
@@ -370,83 +836,50 @@
 		border-radius: 8px;
 		border: 1px solid #e2e8f0;
 	}
-	.panel-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 1.5rem;
-		gap: 1rem;
-		flex-wrap: wrap;
-	}
-	.panel-header h3 {
-		margin: 0;
-		font-size: 1.1rem;
-		color: #0f172a;
-	}
-	.mt-1 {
-		margin-top: 1.5rem;
-	}
-
-	.category-list {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-	.category-row {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
-	}
-	.category-label {
-		display: flex;
-		justify-content: space-between;
-		align-items: baseline;
-		font-size: 0.9rem;
-		color: #0f172a;
-		font-weight: 600;
-	}
-	.category-label .sub {
-		font-size: 0.8rem;
-		color: #64748b;
-		font-weight: 500;
-	}
-	.bar-track {
-		height: 8px;
-		background: #f1f5f9;
-		border-radius: 99px;
-		overflow: hidden;
-	}
-	.bar-fill {
-		height: 100%;
-		background: #0b6b36;
-		border-radius: 99px;
-	}
 
 	.filters {
 		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+	.select-wrap {
+		min-width: 180px;
+	}
+	.select-wrap :global(.input-group),
+	.input-wrap {
+		margin-bottom: 0;
+	}
+	.input-wrap {
+		display: flex;
+		flex-direction: column;
 		gap: 0.5rem;
 	}
-	.search-input {
+	.input-wrap label {
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #475569;
+		letter-spacing: 0.5px;
+	}
+	.input-wrap input {
+		padding: 0.75rem;
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
-		padding: 0.5rem 0.75rem;
-		font-size: 0.85rem;
-		color: #334155;
 		font-family: inherit;
-		min-width: 220px;
-	}
-	.search-input:focus {
 		outline: none;
+	}
+	.input-wrap input:focus {
 		border-color: #0b6b36;
 	}
-	.category-select {
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		padding: 0.5rem 0.75rem;
+	.filter-btn {
+		height: 42px;
+	}
+
+	.summary-line {
+		margin: 0 0 1rem 0;
 		font-size: 0.85rem;
-		color: #334155;
-		font-family: inherit;
-		background: white;
+		color: #64748b;
 	}
 
 	.data-table {
@@ -460,6 +893,7 @@
 		color: #64748b;
 		font-size: 0.75rem;
 		letter-spacing: 0.5px;
+		white-space: nowrap;
 	}
 	.data-table td {
 		padding: 1rem;
@@ -469,6 +903,39 @@
 	}
 	.data-table td strong {
 		color: #0f172a;
+	}
+	.data-table td .sub {
+		display: block;
+		font-size: 0.75rem;
+		color: #94a3b8;
+	}
+	.data-table td.positive {
+		color: #166534;
+		font-weight: 600;
+	}
+	.data-table td.negative {
+		color: #991b1b;
+		font-weight: 600;
+	}
+
+	.badge {
+		padding: 0.25rem 0.6rem;
+		border-radius: 20px;
+		font-size: 0.7rem;
+		font-weight: 700;
+		letter-spacing: 0.3px;
+	}
+	.badge.in {
+		background: #dcfce7;
+		color: #166534;
+	}
+	.badge.out {
+		background: #fee2e2;
+		color: #991b1b;
+	}
+	.badge.move {
+		background: #e0f2fe;
+		color: #0369a1;
 	}
 
 	.pager {
@@ -501,21 +968,6 @@
 		color: #94a3b8;
 		border-color: #e2e8f0;
 		cursor: not-allowed;
-	}
-
-	.badge {
-		padding: 0.25rem 0.75rem;
-		border-radius: 20px;
-		font-size: 0.75rem;
-		font-weight: 600;
-	}
-	.badge.in-stock {
-		background: #dcfce7;
-		color: #166534;
-	}
-	.badge.out-stock {
-		background: #e2e8f0;
-		color: #475569;
 	}
 
 	.empty-state {

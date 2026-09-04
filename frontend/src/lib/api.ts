@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/public';
+import { endExpiredSession } from '$lib/auth';
 
 // Base URL of the ASP.NET backend. Set PUBLIC_API_BASE_URL for the target
 // environment - including when the backend runs on a scheme or port other than
@@ -50,4 +51,26 @@ export async function apiErrorMessage(res: Response, fallback: string): Promise<
 	}
 
 	return fallback;
+}
+
+/**
+ * GETs `path` and parses the JSON body, the shape every read-only fetch
+ * helper in this app follows: an expired session is sent back to login
+ * rather than reported as this particular failure, and any other non-2xx is
+ * turned into the message above.
+ */
+export async function getJson<T>(path: string, what: string): Promise<T> {
+	const res = await apiFetch(path);
+
+	if (res.status === 401) {
+		// The session is gone. Clearing it matters: the route guards read the
+		// stored role, so leaving it behind waves the visitor back onto a page
+		// whose every request now fails.
+		endExpiredSession();
+		throw new Error('Your session has expired.');
+	}
+
+	if (!res.ok) throw new Error(await apiErrorMessage(res, `Failed to load ${what}.`));
+
+	return res.json();
 }
