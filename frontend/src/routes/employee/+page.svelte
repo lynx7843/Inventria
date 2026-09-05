@@ -7,7 +7,8 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
-	import { fetchItemPage, type Item } from '$lib/inventory';
+	import { resolve } from '$app/paths';
+	import { fetchItemPage, isLowStock, type Item } from '$lib/inventory';
 
 	// Gates the markup below. No role list: the stock movements on this page are
 	// open to Admins as well, so this only requires that someone is signed in.
@@ -18,12 +19,13 @@
 	let isLoading = $state(true);
 	let errorMsg = $state('');
 
-	// The four counters across the top. Zeros until the API answers, rather than
-	// the invented figures that used to sit here - a brand new warehouse really
-	// does have nothing in it, and saying so beats saying 12,482.
+	// The counters across the top. Zeros until the API answers, rather than the
+	// invented figures that used to sit here - a brand new warehouse really does
+	// have nothing in it, and saying so beats saying 12,482.
 	let stats = $state({
 		unitsOnHand: 0,
 		skusTracked: 0,
+		lowStockCount: 0,
 		receivedToday: 0,
 		pickedToday: 0
 	});
@@ -103,10 +105,10 @@
          and delivered nothing was worse than no button. -->
 		</div>
 
-		<!-- Every figure here is one the database can answer. The two that used to be
-       here and cannot be - a low-stock count, which needs a reorder level no
-       item carries, and an "efficiency rate", which was never defined as
-       anything - were removed rather than approximated. -->
+		<!-- Every figure here is one the database can answer. The low-stock count is
+       back: it needed a reorder level no item carried, and items carry one now.
+       The other figure that was removed with it - an "efficiency rate" - was
+       never defined as anything and stays gone rather than approximated. -->
 		<div class="stats-grid">
 			<div class="stat-card">
 				<div class="icon-box">📦</div>
@@ -118,6 +120,16 @@
 				<p class="subtext">SKUS TRACKED</p>
 				<div class="value">{stats.skusTracked.toLocaleString()}</div>
 			</div>
+			<!-- The only tile that is a job rather than a measurement, so it is the
+           only one that goes anywhere: it opens the list of what to order. -->
+			<a class="stat-card alert-card" href={resolve('/reports?tab=reorder')}>
+				<div class="icon-box warning">⚠️</div>
+				<p class="subtext">LOW STOCK</p>
+				<div class="value">{stats.lowStockCount.toLocaleString()}</div>
+				<p class="tile-link">
+					{stats.lowStockCount === 0 ? 'Nothing needs reordering' : 'See what to order →'}
+				</p>
+			</a>
 			<div class="stat-card">
 				<div class="icon-box success">✔️</div>
 				<p class="subtext">RECEIVED TODAY</p>
@@ -206,12 +218,15 @@
 								<td>{item.quantityOnHand.toLocaleString()}</td>
 								<!-- The badge said ACTIVE for everything, which described the row
                    rather than the stock. What a picker needs to know is whether
-                   there is any to pick. -->
+                   there is any to pick - and, now that items carry a reorder
+                   point, whether what is left is enough. -->
 								<td>
-									{#if item.quantityOnHand > 0}
-										<span class="badge in-stock">IN STOCK</span>
-									{:else}
+									{#if item.quantityOnHand === 0}
 										<span class="badge out-stock">OUT OF STOCK</span>
+									{:else if isLowStock(item)}
+										<span class="badge low-stock">LOW STOCK</span>
+									{:else}
+										<span class="badge in-stock">IN STOCK</span>
 									{/if}
 								</td>
 							</tr>
@@ -266,7 +281,9 @@
 
 	.stats-grid {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		/* Five tiles now rather than four, and auto-fit rather than a fixed five
+		   so they wrap instead of squeezing to nothing on a narrow screen. */
+		grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 		gap: 1.5rem;
 		margin-bottom: 2rem;
 	}
@@ -287,6 +304,28 @@
 	}
 	.icon-box.success {
 		background: #dcfce7;
+	}
+	.icon-box.warning {
+		background: #fef3c7;
+	}
+
+	.alert-card {
+		display: block;
+		text-decoration: none;
+		color: inherit;
+		transition:
+			border-color 0.2s,
+			box-shadow 0.2s;
+	}
+	.alert-card:hover {
+		border-color: #f59e0b;
+		box-shadow: 0 1px 6px rgb(0 0 0 / 8%);
+	}
+	.tile-link {
+		margin: 0.5rem 0 0 0;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #b45309;
 	}
 	.stat-card .subtext {
 		font-size: 0.75rem;
@@ -410,6 +449,10 @@
 	.badge.in-stock {
 		background: #dcfce7;
 		color: #166534;
+	}
+	.badge.low-stock {
+		background: #fef3c7;
+		color: #92400e;
 	}
 	.badge.out-stock {
 		background: #e2e8f0;

@@ -6,7 +6,7 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
-	import { fetchItemPage, type Item } from '$lib/inventory';
+	import { fetchItemPage, isLowStock, parseLevel, type Item } from '$lib/inventory';
 
 	// Gates the markup below. No role list: Admins and Employees both manage
 	// inventory, so this only requires that someone is signed in.
@@ -31,6 +31,12 @@
 	let sku = $state('');
 	let name = $state('');
 	let category = $state('');
+
+	// Held as strings like every other field on this form, and turned into
+	// numbers only on the way out - see parseLevel for why a blank box is a
+	// meaningful answer here rather than a missing one.
+	let reorderPoint = $state('');
+	let reorderQuantity = $state('');
 
 	// 1. Fetch One Page Of Items (Read)
 	async function loadItems() {
@@ -94,7 +100,13 @@
 			const res = await apiFetch(path, {
 				method,
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ sku, name, category })
+				body: JSON.stringify({
+					sku,
+					name,
+					category,
+					reorderPoint: parseLevel(reorderPoint),
+					reorderQuantity: parseLevel(reorderQuantity)
+				})
 			});
 
 			if (res.ok) {
@@ -160,6 +172,11 @@
 		sku = '';
 		name = '';
 		category = '';
+		// Blank rather than '0': a new item is not tracked for reordering until
+		// someone decides it should be, and an empty box invites that decision
+		// where a pre-filled zero looks like one already made.
+		reorderPoint = '';
+		reorderQuantity = '';
 		errorMsg = '';
 		showForm = true;
 	}
@@ -170,6 +187,10 @@
 		sku = item.sku;
 		name = item.name;
 		category = item.category;
+		// Zero is "not tracked", so it shows as the empty box it was typed in as
+		// rather than as a level someone set.
+		reorderPoint = item.reorderPoint ? String(item.reorderPoint) : '';
+		reorderQuantity = item.reorderQuantity ? String(item.reorderQuantity) : '';
 		errorMsg = '';
 		showForm = true;
 	}
@@ -183,13 +204,25 @@
 	// round trip, and nothing beyond what the table already shows.
 	function exportCsv() {
 		const rows = [
-			['ID', 'SKU', 'Item Name', 'Category', 'Quantity On Hand'],
+			[
+				'ID',
+				'SKU',
+				'Item Name',
+				'Category',
+				'Quantity On Hand',
+				'Reorder Point',
+				'Reorder Quantity',
+				'Low Stock'
+			],
 			...items.map((item) => [
 				String(item.id),
 				item.sku,
 				item.name,
 				item.category,
-				String(item.quantityOnHand)
+				String(item.quantityOnHand),
+				String(item.reorderPoint),
+				String(item.reorderQuantity),
+				isLowStock(item) ? 'Yes' : 'No'
 			])
 		];
 
@@ -267,6 +300,31 @@
 							required={true}
 						/>
 					</div>
+					<div class="input-row">
+						<InputField
+							id="reorder-point"
+							type="number"
+							label="REORDER POINT"
+							placeholder="Leave blank if not tracked"
+							bind:value={reorderPoint}
+							min={0}
+							step={1}
+						/>
+						<InputField
+							id="reorder-quantity"
+							type="number"
+							label="REORDER QUANTITY"
+							placeholder="Lot size to order in"
+							bind:value={reorderQuantity}
+							min={0}
+							step={1}
+						/>
+						<p class="field-note">
+							Set a reorder point and this item starts appearing on the low-stock tile and the
+							Reorder report once its stock falls to that level. The reorder quantity is the lot
+							size suggestions come in; leave it blank to be told to top back up to the point.
+						</p>
+					</div>
 					<div class="actions">
 						<button type="button" class="btn-outline" onclick={closeForm}>Cancel</button>
 						<div class="submit-wrap">
@@ -285,14 +343,16 @@
 						<th>ITEM NAME</th>
 						<th>SKU</th>
 						<th>CATEGORY</th>
+						<th>ON HAND</th>
+						<th>REORDER POINT</th>
 						<th class="text-right">ACTIONS</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if isLoading}
-						<tr><td colspan="5" class="empty-state">Loading database...</td></tr>
+						<tr><td colspan="7" class="empty-state">Loading database...</td></tr>
 					{:else if items.length === 0}
-						<tr><td colspan="5" class="empty-state">No items found. Create one above.</td></tr>
+						<tr><td colspan="7" class="empty-state">No items found. Create one above.</td></tr>
 					{:else}
 						{#each items as item (item.id)}
 							<tr>
@@ -300,6 +360,17 @@
 								<td><strong>{item.name}</strong></td>
 								<td><span class="badge gray">{item.sku}</span></td>
 								<td>{item.category}</td>
+								<td>
+									{item.quantityOnHand.toLocaleString()}
+									{#if isLowStock(item)}
+										<span class="badge low">LOW</span>
+									{/if}
+								</td>
+								<!-- An em dash rather than a 0, because the column is not asking how
+                     many are needed - it is asking whether anyone has said. -->
+								<td class="text-muted">
+									{item.reorderPoint > 0 ? item.reorderPoint.toLocaleString() : '—'}
+								</td>
 								<td class="text-right action-btns">
 									<button class="btn-icon edit" onclick={() => openEditForm(item)}>✏️</button>
 									<button class="btn-icon delete" onclick={() => deleteItem(item.id)}>🗑️</button>
@@ -455,6 +526,21 @@
 		background: #f1f5f9;
 		color: #475569;
 		border: 1px solid #e2e8f0;
+	}
+	.badge.low {
+		background: #fef3c7;
+		color: #92400e;
+		border: 1px solid #fcd34d;
+		font-family: inherit;
+		margin-left: 0.5rem;
+	}
+
+	.field-note {
+		align-self: center;
+		margin: 0 0 1.5rem 0;
+		font-size: 0.8rem;
+		line-height: 1.4;
+		color: #64748b;
 	}
 
 	.action-btns {

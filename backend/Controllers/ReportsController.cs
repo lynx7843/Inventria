@@ -245,6 +245,61 @@ public class ReportsController : ControllerBase
         });
     }
 
+    // What to buy, and how much of it - the report the other four could not
+    // produce, because until Item carried a reorder point there was no level for
+    // stock to be "below". Every rule about what counts as low and what to order
+    // lives in LowStock, shared with the dashboards' tile, so the count on the
+    // tile and the number of rows here are the same query.
+    [HttpGet("reorder")]
+    public IActionResult GetReorder(
+        [FromQuery] string? category,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = DefaultPageSize)
+    {
+        (page, pageSize) = ClampPaging(page, pageSize);
+
+        var query = LowStock.Ordered(_context);
+
+        // Same exact, case-insensitive match the stock-on-hand report uses: the
+        // value comes from a dropdown of the categories that exist, not from
+        // someone searching within them.
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            var trimmed = category.Trim();
+            query = query.Where(line => line.Category.ToLower() == trimmed.ToLower());
+        }
+
+        var totalCount = query.Count();
+
+        // Summed over everything the filters match rather than the page on
+        // screen, because the question a buyer asks of this report - how much am
+        // I about to order - is not a question about page one.
+        var totalUnitsToOrder = query.Sum(line => (int?)line.SuggestedOrderQuantity) ?? 0;
+
+        // Lines the report can put a quantity against. The two numbers differ
+        // only for an item sitting exactly on its reorder point with no reorder
+        // quantity recorded: it is genuinely low, and the data genuinely does not
+        // say how much to buy, so it is listed and left out of the order rather
+        // than given an invented figure.
+        var orderableCount = query.Count(line => line.SuggestedOrderQuantity > 0);
+
+        var rows = query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Ok(new
+        {
+            Items = rows,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize),
+            TotalUnitsToOrder = totalUnitsToOrder,
+            OrderableCount = orderableCount
+        });
+    }
+
     [HttpGet("velocity")]
     public IActionResult GetVelocity(
         [FromQuery] int days = 30,

@@ -87,6 +87,38 @@ export type VelocityPage = {
 	days: number;
 };
 
+/** One row of `GET /api/reports/reorder` - an item that needs buying. */
+export type ReorderRow = {
+	itemId: number;
+	sku: string;
+	name: string;
+	category: string;
+	quantityOnHand: number;
+	reorderPoint: number;
+	/** The lot size. Zero when nobody has recorded one for this item. */
+	reorderQuantity: number;
+	/** How far under the point the item is. Zero for one sitting exactly on it. */
+	shortfall: number;
+	/**
+	 * How much to order. Zero only for an item on its point with no lot size
+	 * recorded - genuinely low, with nothing in the data to say how much of it to
+	 * buy. Those rows are listed but never become purchase order lines.
+	 */
+	suggestedOrderQuantity: number;
+};
+
+export type ReorderPage = {
+	items: ReorderRow[];
+	page: number;
+	pageSize: number;
+	totalCount: number;
+	totalPages: number;
+	/** Units to order across everything the filters match, not just this page. */
+	totalUnitsToOrder: number;
+	/** Rows carrying a quantity - the lines a purchase order can be written from. */
+	orderableCount: number;
+};
+
 /** Builds a query string, leaving out anything unset rather than sending `?x=`. */
 function query(params: Record<string, string | number | undefined>): string {
 	const search = new URLSearchParams();
@@ -147,5 +179,17 @@ export function fetchVelocity(opts: {
 	return getJson<VelocityPage>(
 		`/api/reports/velocity${query({ days, page, pageSize })}`,
 		'velocity'
+	);
+}
+
+export function fetchReorder(opts: {
+	category?: string;
+	page?: number;
+	pageSize?: number;
+}): Promise<ReorderPage> {
+	const { category, page = 1, pageSize = 15 } = opts;
+	return getJson<ReorderPage>(
+		`/api/reports/reorder${query({ category, page, pageSize })}`,
+		'the reorder list'
 	);
 }
