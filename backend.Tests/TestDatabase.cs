@@ -55,12 +55,50 @@ public sealed class TestDatabase : IDisposable
         return new SqliteInventriaDbContext(options);
     }
 
-    public Item AddItem(string sku = "SKU-1", string name = "Steel Wrench", string category = "Tools")
+    /// <summary>
+    /// An item in the master list. Reorder levels default to zero - "not tracked"
+    /// - so every test that is not about reordering gets an item the low-stock
+    /// machinery ignores, which is also what the real catalogue looked like
+    /// before those columns existed.
+    /// </summary>
+    public Item AddItem(
+        string sku = "SKU-1",
+        string name = "Steel Wrench",
+        string category = "Tools",
+        int reorderPoint = 0,
+        int reorderQuantity = 0)
     {
-        var item = new Item { Sku = sku, Name = name, Category = category };
+        var item = new Item
+        {
+            Sku = sku,
+            Name = name,
+            Category = category,
+            ReorderPoint = reorderPoint,
+            ReorderQuantity = reorderQuantity
+        };
         Context.Items.Add(item);
         Context.SaveChanges();
         return item;
+    }
+
+    /// <summary>
+    /// An account, for the endpoints that read something off the caller's own
+    /// row rather than off their token - the low-stock warning a pick answers
+    /// with is gated on this user's NotifyLowStock preference.
+    /// </summary>
+    public User AddUser(int id = 1, string username = "alice", bool notifyLowStock = true)
+    {
+        var user = new User
+        {
+            Id = id,
+            Username = username,
+            Password = "hash",
+            Role = UserRoles.Employee,
+            NotifyLowStock = notifyLowStock
+        };
+        Context.Users.Add(user);
+        Context.SaveChanges();
+        return user;
     }
 
     public WarehouseBin AddBin(string zone = "Electronics", string aisle = "A1", string shelf = "S1")

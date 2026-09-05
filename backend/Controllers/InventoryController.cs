@@ -25,6 +25,53 @@ public class InventoryController : ControllerBase
     // [Authorize] guarantees an authenticated principal, so the claim is present.
     private string CurrentUsername => User.FindFirstValue(ClaimTypes.Name)!;
 
+    // The account behind the token, for reading its notification preferences.
+    // Same claim UserProfileController resolves the caller from, and [Authorize]
+    // guarantees it is present.
+    private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    /// <summary>
+    /// The sentence to hand back when a pick has just taken an item to or below
+    /// its reorder point, or null when it has not - or when the person who did
+    /// the picking has turned low-stock alerts off.
+    /// </summary>
+    /// <remarks>
+    /// This is where a low-stock alert is worth delivering: the moment stock
+    /// falls, to the person who just made it fall, while they are still standing
+    /// at the shelf. A receive can only push an item further from its point and a
+    /// relocation moves units between bins without changing the total, so neither
+    /// can start an alert that this has not already raised.
+    ///
+    /// It reads the item's total across every bin rather than the bin just picked
+    /// from, because a reorder point is a question about the warehouse, not about
+    /// one shelf: an item with 2 left in this bin and 400 in the next one does
+    /// not need buying.
+    /// </remarks>
+    private string? LowStockNoticeFor(int itemId)
+    {
+        // The preference lives on the account row. A token naming an id with no
+        // row behind it is not a reason to withhold a warning about stock, so the
+        // default the User model declares - on - applies.
+        var wantsAlerts = _context.Users
+            .Where(u => u.Id == CurrentUserId)
+            .Select(u => (bool?)u.NotifyLowStock)
+            .FirstOrDefault() ?? true;
+
+        if (!wantsAlerts) return null;
+
+        // Deliberately the same query the dashboards count and the reorder report
+        // lists, so an item cannot be low here and fine there.
+        var line = LowStock.Lines(_context).FirstOrDefault(l => l.ItemId == itemId);
+        if (line == null) return null;
+
+        var order = line.SuggestedOrderQuantity > 0
+            ? $" Suggested order: {line.SuggestedOrderQuantity} units."
+            : " No reorder quantity is set for it, so there is no suggested amount.";
+
+        return $"Low stock: {line.Name} is down to {line.QuantityOnHand} units, "
+             + $"at or below its reorder point of {line.ReorderPoint}.{order}";
+    }
+
     // How many times a stock move re-runs after losing a race. Conflicts only
     // happen when two requests touch the same item/bin at the same moment; past
     // this many losses the bin is hot enough that the caller should be told to
@@ -125,6 +172,11 @@ public class InventoryController : ControllerBase
                 i.Sku,
                 i.Name,
                 i.Category,
+                // Carried on every row so the tables that list items can mark
+                // the low ones without a second request per row. Zero means the
+                // item is not tracked for reordering; see Item.
+                i.ReorderPoint,
+                i.ReorderQuantity,
                 QuantityOnHand = _context.InventoryBalances
                     .Where(b => b.ItemId == i.Id)
                     .Sum(b => (int?)b.Quantity) ?? 0
@@ -154,7 +206,9 @@ public class InventoryController : ControllerBase
         {
             Sku = sku,
             Name = request.Name.Trim(),
-            Category = request.Category.Trim()
+            Category = request.Category.Trim(),
+            ReorderPoint = request.ReorderPoint,
+            ReorderQuantity = request.ReorderQuantity
         };
 
         _context.Items.Add(newItem);
@@ -180,6 +234,8 @@ public class InventoryController : ControllerBase
         item.Sku = request.Sku.Trim();
         item.Name = request.Name.Trim();
         item.Category = request.Category.Trim();
+        item.ReorderPoint = request.ReorderPoint;
+        item.ReorderQuantity = request.ReorderQuantity;
 
         try
         {
@@ -341,9 +397,12 @@ public class InventoryController : ControllerBase
 
             _context.SaveChanges();
 
+            // Read after the save, so it describes the shelf as it now stands
+            // rather than as it stood before the units left it.
             return Ok(new {
                 Message = $"Successfully picked {request.Quantity} units from Bin {request.WarehouseBinId}.",
-                RemainingBalance = balance.Quantity
+                RemainingBalance = balance.Quantity,
+                LowStockWarning = LowStockNoticeFor(request.ItemId)
             });
         });
     }
@@ -463,6 +522,18 @@ public class ItemRequest
     [NotBlank(ErrorMessage = "Category is required.")]
     [StringLength(100, ErrorMessage = "Category cannot be longer than 100 characters.")]
     public string Category { get; set; } = string.Empty;
+
+    // Both default to zero, which is what "not tracked for reordering" is
+    // spelled as, so a caller that has never heard of these fields - an older
+    // client, a script written against the previous shape - keeps working and
+    // keeps the item out of the alerts. Negative is refused rather than clamped:
+    // a reorder point below zero is not an unusual choice, it is a mistake, and
+    // silently storing zero would hide it.
+    [Range(0, int.MaxValue, ErrorMessage = "Reorder point cannot be negative.")]
+    public int ReorderPoint { get; set; }
+
+    [Range(0, int.MaxValue, ErrorMessage = "Reorder quantity cannot be negative.")]
+    public int ReorderQuantity { get; set; }
 }
 
 // None of these carry a PerformedBy: attribution comes from the caller's token,

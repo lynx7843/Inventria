@@ -8,7 +8,23 @@ export type Item = {
 	category: string;
 	/** Units on the shelves for this item, summed across every bin holding it. */
 	quantityOnHand: number;
+	/** The level that triggers a reorder. Zero means the item is not tracked. */
+	reorderPoint: number;
+	/** The lot size to order in. Zero means "top back up to the point". */
+	reorderQuantity: number;
 };
+
+/**
+ * Whether an item has fallen to or below the level it says it needs more at.
+ *
+ * The same rule the API applies in `LowStock` - an item with no reorder point is
+ * never low, and reaching the point counts, because the point is what triggers
+ * an order rather than the level below it. Kept in one place so the badge on a
+ * table and the count on a dashboard tile cannot drift apart.
+ */
+export function isLowStock(item: Item): boolean {
+	return item.reorderPoint > 0 && item.quantityOnHand <= item.reorderPoint;
+}
 
 /** A storage location, as `GET /api/warehousebins` returns it. */
 export type WarehouseBin = {
@@ -52,6 +68,21 @@ export function itemLabel(item: Item): string {
 export function parseUnits(value: unknown): number | null {
 	const units = Number(value);
 	return Number.isInteger(units) && units > 0 ? units : null;
+}
+
+/**
+ * A reorder level typed into a form, as a number the API will accept.
+ *
+ * Unlike `parseUnits`, there is a right answer for a box left empty: zero, which
+ * is how "not tracked for reordering" is spelled. Anything that is not a whole
+ * number at or above zero - a stray letter, a decimal, a minus sign - means the
+ * same thing here, because none of them is a level someone chose. The API
+ * refuses a negative rather than storing it, so nothing is quietly rounded away
+ * that a person actually asked for.
+ */
+export function parseLevel(value: unknown): number {
+	const level = Number(value);
+	return Number.isInteger(level) && level >= 0 ? level : 0;
 }
 
 /** One page of items, as `GET /api/inventory` returns it. */

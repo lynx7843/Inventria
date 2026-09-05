@@ -3,25 +3,39 @@
 	import Header from '$lib/components/shared/Header.svelte';
 	import SelectField from '$lib/components/shared/SelectField.svelte';
 	import { onMount } from 'svelte';
-	import { requireSession } from '$lib/auth';
+	import { requireSession, getUsername } from '$lib/auth';
 	import { fetchAllItems, fetchBins, itemLabel, type Option } from '$lib/inventory';
 	import {
 		fetchStockOnHand,
 		fetchMovements,
 		fetchDeadStock,
 		fetchVelocity,
+		fetchReorder,
 		type StockOnHandRow,
 		type MovementRow,
 		type DeadStockRow,
-		type VelocityRow
+		type VelocityRow,
+		type ReorderRow
 	} from '$lib/reports';
 
 	// Open to anyone signed in, same as Inventory and Bins - reports on the
 	// catalogue aren't an Admin secret.
 	let allowed = $state(false);
 
-	type Tab = 'stock' | 'movements' | 'dead-stock' | 'velocity';
+	type Tab = 'stock' | 'movements' | 'dead-stock' | 'velocity' | 'reorder' | 'purchase-order';
 	let activeTab: Tab = $state('stock');
+
+	// The tab strip as data rather than six hand-written buttons, so that the
+	// ?tab= link the dashboards send people here with can be checked against the
+	// same list the strip renders from.
+	const TABS: { id: Tab; label: string }[] = [
+		{ id: 'stock', label: 'Stock on Hand' },
+		{ id: 'movements', label: 'Movements' },
+		{ id: 'reorder', label: 'Reorder' },
+		{ id: 'purchase-order', label: 'Purchase Order' },
+		{ id: 'dead-stock', label: 'Dead Stock' },
+		{ id: 'velocity', label: 'Velocity' }
+	];
 
 	const PAGE_SIZE = 15;
 
@@ -234,6 +248,110 @@
 		loadVelocity();
 	}
 
+	// --- REORDER -------------------------------------------------------------
+
+	let reorderCategory = $state('');
+	let reorderPage = $state(1);
+	let reorderRows: ReorderRow[] = $state([]);
+	let reorderTotalPages = $state(1);
+	let reorderTotalCount = $state(0);
+	let reorderUnitsToOrder = $state(0);
+	let reorderOrderableCount = $state(0);
+	let reorderLoading = $state(true);
+	let reorderError = $state('');
+
+	async function loadReorder() {
+		reorderLoading = true;
+		reorderError = '';
+		try {
+			const result = await fetchReorder({
+				category: reorderCategory,
+				page: reorderPage,
+				pageSize: PAGE_SIZE
+			});
+			reorderRows = result.items;
+			reorderTotalPages = result.totalPages;
+			reorderTotalCount = result.totalCount;
+			reorderUnitsToOrder = result.totalUnitsToOrder;
+			reorderOrderableCount = result.orderableCount;
+		} catch (err) {
+			reorderError = err instanceof Error ? err.message : 'Failed to load the reorder list.';
+		} finally {
+			reorderLoading = false;
+		}
+	}
+
+	function applyReorderFilters(e: Event) {
+		e.preventDefault();
+		reorderPage = 1;
+		loadReorder();
+	}
+
+	function goToReorderPage(next: number) {
+		if (next < 1 || next > reorderTotalPages || next === reorderPage) return;
+		reorderPage = next;
+		loadReorder();
+	}
+
+	// --- SUGGESTED PURCHASE ORDER --------------------------------------------
+
+	// The reorder report answers "what is low"; this answers "so what do I buy",
+	// which is the same rows with the ones that carry no quantity left out and
+	// nothing paged away. There is no separate endpoint because there is no
+	// separate question - a purchase order is the reorder list written out as a
+	// document.
+	//
+	// What the model does not have is a supplier or a unit cost, so this is a
+	// list of what to buy and how much, not a priced order addressed to anyone.
+	// Inventing either would be inventing the part a buyer is accountable for.
+	const PO_MAX_LINES = 200;
+
+	let poRows: ReorderRow[] = $state([]);
+	let poTotalCount = $state(0);
+	let poUnitsToOrder = $state(0);
+	let poOrderableCount = $state(0);
+	let poLoading = $state(false);
+	let poError = $state('');
+	let poLoaded = $state(false);
+	let poGeneratedAt = $state('');
+
+	async function loadPurchaseOrder() {
+		poLoading = true;
+		poError = '';
+		try {
+			// The whole list rather than a page of it: a purchase order that stops
+			// at row 15 is not a purchase order. PO_MAX_LINES is the API's own
+			// ceiling on a single request, and the note below says so when a
+			// warehouse is somehow past it.
+			const result = await fetchReorder({ page: 1, pageSize: PO_MAX_LINES });
+
+			poRows = result.items.filter((row) => row.suggestedOrderQuantity > 0);
+			poTotalCount = result.totalCount;
+			poUnitsToOrder = result.totalUnitsToOrder;
+			poOrderableCount = result.orderableCount;
+			poGeneratedAt = new Date().toLocaleString();
+			poLoaded = true;
+		} catch (err) {
+			poError = err instanceof Error ? err.message : 'Failed to build the purchase order.';
+		} finally {
+			poLoading = false;
+		}
+	}
+
+	// Every other report on this page is one page of fifteen rows, which is why
+	// they all load up front. This one asks for up to two hundred, so it waits
+	// until someone actually opens it.
+	function showTab(tab: Tab) {
+		activeTab = tab;
+		if (tab === 'purchase-order' && !poLoaded && !poLoading) loadPurchaseOrder();
+	}
+
+	/** How many low items the order cannot put a quantity against. See ReorderRow. */
+	const poUnquantified = $derived(poTotalCount - poOrderableCount);
+
+	/** Whether the warehouse has more low items than one request can carry. */
+	const poTruncated = $derived(poTotalCount > PO_MAX_LINES);
+
 	onMount(() => {
 		if (!requireSession()) return;
 		allowed = true;
@@ -247,6 +365,13 @@
 		loadMovements();
 		loadDeadStock();
 		loadVelocity();
+		loadReorder();
+
+		// The dashboards' low-stock tile links straight at ?tab=reorder, so the
+		// person who clicked a number lands on the list behind it rather than on
+		// stock-on-hand with a tab still to find.
+		const requested = new URLSearchParams(window.location.search).get('tab');
+		if (TABS.some((tab) => tab.id === requested)) showTab(requested as Tab);
 	});
 
 	function formatTimestamp(iso: string): string {
@@ -295,6 +420,46 @@
 				r.performedBy
 			]);
 			filename = 'stock-movements';
+		} else if (activeTab === 'reorder') {
+			headers = [
+				'Item Name',
+				'SKU',
+				'Category',
+				'Quantity On Hand',
+				'Reorder Point',
+				'Short By',
+				'Reorder Quantity',
+				'Suggested Order Quantity'
+			];
+			rows = reorderRows.map((r) => [
+				r.name,
+				r.sku,
+				r.category,
+				String(r.quantityOnHand),
+				String(r.reorderPoint),
+				String(r.shortfall),
+				String(r.reorderQuantity),
+				String(r.suggestedOrderQuantity)
+			]);
+			filename = 'reorder';
+		} else if (activeTab === 'purchase-order') {
+			headers = [
+				'SKU',
+				'Item Name',
+				'Category',
+				'Quantity On Hand',
+				'Reorder Point',
+				'Order Quantity'
+			];
+			rows = poRows.map((r) => [
+				r.sku,
+				r.name,
+				r.category,
+				String(r.quantityOnHand),
+				String(r.reorderPoint),
+				String(r.suggestedOrderQuantity)
+			]);
+			filename = 'purchase-order';
 		} else if (activeTab === 'dead-stock') {
 			headers = ['Item Name', 'SKU', 'Category', 'Quantity On Hand', 'Last Movement'];
 			rows = deadStockRows.map((r) => [
@@ -350,34 +515,11 @@
 		</div>
 
 		<div class="tabs">
-			<button
-				class="tab"
-				class:active={activeTab === 'stock'}
-				onclick={() => (activeTab = 'stock')}
-			>
-				Stock on Hand
-			</button>
-			<button
-				class="tab"
-				class:active={activeTab === 'movements'}
-				onclick={() => (activeTab = 'movements')}
-			>
-				Movements
-			</button>
-			<button
-				class="tab"
-				class:active={activeTab === 'dead-stock'}
-				onclick={() => (activeTab = 'dead-stock')}
-			>
-				Dead Stock
-			</button>
-			<button
-				class="tab"
-				class:active={activeTab === 'velocity'}
-				onclick={() => (activeTab = 'velocity')}
-			>
-				Velocity
-			</button>
+			{#each TABS as tab (tab.id)}
+				<button class="tab" class:active={activeTab === tab.id} onclick={() => showTab(tab.id)}>
+					{tab.label}
+				</button>
+			{/each}
 		</div>
 
 		<!-- STOCK ON HAND -->
@@ -604,6 +746,216 @@
 						</div>
 					</div>
 				{/if}
+			</div>
+		{/if}
+
+		<!-- REORDER -->
+		{#if activeTab === 'reorder'}
+			<div class="panel">
+				<form class="filters" onsubmit={applyReorderFilters}>
+					<div class="select-wrap">
+						<SelectField
+							id="reorder-category"
+							label="CATEGORY"
+							options={categoryOptions}
+							bind:value={reorderCategory}
+							placeholder="All categories"
+							emptyLabel={isLoadingOptions ? 'Loading...' : 'No categories yet'}
+						/>
+					</div>
+					<button type="submit" class="btn-solid filter-btn">Apply Filters</button>
+					{#if reorderCategory}
+						<button
+							type="button"
+							class="btn-outline filter-btn"
+							onclick={() => {
+								reorderCategory = '';
+								reorderPage = 1;
+								loadReorder();
+							}}
+						>
+							Clear
+						</button>
+					{/if}
+				</form>
+
+				<p class="summary-line">
+					Items that have fallen to or below the level they say they need more at. An item with no
+					reorder point set never appears here, however empty its shelf is.
+				</p>
+
+				{#if !reorderLoading && !reorderError && reorderTotalCount > 0}
+					<p class="summary-line strong">
+						{reorderTotalCount} item{reorderTotalCount === 1 ? '' : 's'} to reorder, totalling
+						{reorderUnitsToOrder.toLocaleString()} units.
+						{#if reorderOrderableCount < reorderTotalCount}
+							{reorderTotalCount - reorderOrderableCount} of them carry no suggested amount, because they
+							sit exactly on their reorder point with no reorder quantity recorded.
+						{/if}
+					</p>
+				{/if}
+
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>ITEM NAME</th>
+							<th>SKU</th>
+							<th>CATEGORY</th>
+							<th>ON HAND</th>
+							<th>REORDER POINT</th>
+							<th>SHORT BY</th>
+							<th>SUGGESTED ORDER</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if reorderLoading}
+							<tr><td colspan="7" class="empty-state">Loading the reorder list...</td></tr>
+						{:else if reorderError}
+							<tr><td colspan="7" class="empty-state error">{reorderError}</td></tr>
+						{:else if reorderRows.length === 0}
+							<tr>
+								<td colspan="7" class="empty-state">
+									Nothing needs reordering - every item with a reorder point is above it.
+								</td>
+							</tr>
+						{:else}
+							{#each reorderRows as row (row.itemId)}
+								<tr>
+									<td><strong>{row.name}</strong></td>
+									<td>{row.sku}</td>
+									<td>{row.category}</td>
+									<td class:negative={row.quantityOnHand === 0}>
+										{row.quantityOnHand.toLocaleString()}
+									</td>
+									<td>{row.reorderPoint.toLocaleString()}</td>
+									<td>{row.shortfall.toLocaleString()}</td>
+									<td>
+										{#if row.suggestedOrderQuantity > 0}
+											<strong>{row.suggestedOrderQuantity.toLocaleString()}</strong>
+											{#if row.reorderQuantity > 0}
+												<span class="sub">in lots of {row.reorderQuantity.toLocaleString()}</span>
+											{/if}
+										{:else}
+											<span class="sub">No reorder quantity set</span>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+
+				{#if reorderTotalCount > 0}
+					<div class="pager">
+						<span class="pager-status">
+							Page {reorderPage} of {reorderTotalPages}
+						</span>
+						<div class="pager-buttons">
+							<button
+								class="pager-btn"
+								onclick={() => goToReorderPage(reorderPage - 1)}
+								disabled={reorderPage <= 1 || reorderLoading}>Previous</button
+							>
+							<button
+								class="pager-btn"
+								onclick={() => goToReorderPage(reorderPage + 1)}
+								disabled={reorderPage >= reorderTotalPages || reorderLoading}>Next</button
+							>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- SUGGESTED PURCHASE ORDER -->
+		{#if activeTab === 'purchase-order'}
+			<div class="panel document">
+				<div class="doc-header">
+					<div>
+						<h3>Suggested Purchase Order</h3>
+						<p class="doc-meta">
+							Generated {poGeneratedAt || '—'}{getUsername() ? ` by ${getUsername()}` : ''}
+						</p>
+					</div>
+					<button class="btn-outline" onclick={loadPurchaseOrder} disabled={poLoading}>
+						{poLoading ? 'Rebuilding…' : 'Rebuild'}
+					</button>
+				</div>
+
+				<p class="summary-line">
+					Every item at or below its reorder point, with how much to buy: whole lots where a reorder
+					quantity is recorded, otherwise enough to top the item back up to its point. It names no
+					supplier and carries no prices, because the catalogue records neither - this is what to
+					buy, for a buyer to price and place.
+				</p>
+
+				{#if poUnquantified > 0}
+					<p class="summary-line warn">
+						{poUnquantified} low item{poUnquantified === 1 ? ' is' : 's are'} left off: sitting exactly
+						on the reorder point with no reorder quantity recorded, there is nothing in the catalogue
+						to say how much to buy. Set a reorder quantity on the Inventory page to include
+						{poUnquantified === 1 ? 'it' : 'them'}.
+					</p>
+				{/if}
+
+				{#if poTruncated}
+					<p class="summary-line warn">
+						{poTotalCount} items are below their reorder point and this order lists the {PO_MAX_LINES}
+						most urgent - the most one request will carry. Work through these, then rebuild.
+					</p>
+				{/if}
+
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>SKU</th>
+							<th>ITEM NAME</th>
+							<th>CATEGORY</th>
+							<th>ON HAND</th>
+							<th>REORDER POINT</th>
+							<th>ORDER QUANTITY</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if poLoading}
+							<tr><td colspan="6" class="empty-state">Building the purchase order...</td></tr>
+						{:else if poError}
+							<tr><td colspan="6" class="empty-state error">{poError}</td></tr>
+						{:else if poRows.length === 0}
+							<tr>
+								<td colspan="6" class="empty-state">
+									Nothing to order - every item with a reorder point is above it.
+								</td>
+							</tr>
+						{:else}
+							{#each poRows as row (row.itemId)}
+								<tr>
+									<td>{row.sku}</td>
+									<td><strong>{row.name}</strong></td>
+									<td>{row.category}</td>
+									<td class:negative={row.quantityOnHand === 0}>
+										{row.quantityOnHand.toLocaleString()}
+									</td>
+									<td>{row.reorderPoint.toLocaleString()}</td>
+									<td><strong>{row.suggestedOrderQuantity.toLocaleString()}</strong></td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+					{#if poRows.length > 0}
+						<tfoot>
+							<tr>
+								<td colspan="5" class="text-right"><strong>Total</strong></td>
+								<td>
+									<strong>{poUnitsToOrder.toLocaleString()} units</strong>
+									<span class="sub"
+										>across {poRows.length} line{poRows.length === 1 ? '' : 's'}</span
+									>
+								</td>
+							</tr>
+						</tfoot>
+					{/if}
+				</table>
 			</div>
 		{/if}
 
@@ -881,6 +1233,48 @@
 		font-size: 0.85rem;
 		color: #64748b;
 	}
+	.summary-line.strong {
+		color: #0f172a;
+		font-weight: 600;
+	}
+	.summary-line.warn {
+		background: #fffbeb;
+		border: 1px solid #fcd34d;
+		border-radius: 6px;
+		padding: 0.75rem;
+		color: #92400e;
+	}
+
+	/* The purchase order reads as a document rather than as another table of
+		figures, because it is the one thing on this page someone acts on and
+		hands to somebody else. */
+	.doc-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 1rem;
+		margin-bottom: 1rem;
+		padding-bottom: 1rem;
+		border-bottom: 2px solid #0f172a;
+	}
+	.doc-header h3 {
+		margin: 0 0 0.25rem 0;
+		font-size: 1.25rem;
+		color: #0f172a;
+	}
+	.doc-meta {
+		margin: 0;
+		font-size: 0.8rem;
+		color: #64748b;
+	}
+	.data-table tfoot td {
+		border-top: 2px solid #0f172a;
+		border-bottom: none;
+		color: #0f172a;
+	}
+	.text-right {
+		text-align: right;
+	}
 
 	.data-table {
 		width: 100%;
@@ -979,5 +1373,30 @@
 	.empty-state.error {
 		color: #ef4444;
 		font-style: normal;
+	}
+
+	/* Printing is on this page because of the purchase order: what comes out of
+		the printer should be the document, not the application around it. The
+		sidebar and header are other components, so reaching them needs :global. */
+	@media print {
+		:global(.sidebar),
+		:global(.top-header) {
+			display: none;
+		}
+		.dashboard-content {
+			margin-left: 0;
+			padding: 0;
+			background: white;
+		}
+		.actions,
+		.tabs,
+		.filters,
+		.pager {
+			display: none;
+		}
+		.panel {
+			border: none;
+			padding: 0;
+		}
 	}
 </style>

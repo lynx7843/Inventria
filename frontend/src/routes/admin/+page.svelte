@@ -30,6 +30,7 @@
 		totalUsers: number;
 		totalStockQuantity: number;
 		monthlyThroughput: number;
+		lowStockCount: number;
 		distribution: CategoryCount[];
 		totalUniqueItems: number;
 		recentActivity: ActivityLog[];
@@ -37,6 +38,7 @@
 		totalUsers: 0,
 		totalStockQuantity: 0,
 		monthlyThroughput: 0,
+		lowStockCount: 0,
 		distribution: [],
 		totalUniqueItems: 0,
 		recentActivity: []
@@ -143,6 +145,17 @@
 				<h4>MONTHLY THROUGHPUT</h4>
 				<div class="value">{stats.monthlyThroughput.toLocaleString()}</div>
 			</div>
+			<!-- The one tile that is a job rather than a measurement, so it is the
+           only one that goes anywhere: it opens the list of what to order. -->
+			<a class="stat-card alert-card" href={resolve('/reports?tab=reorder')}>
+				<h4>LOW STOCK</h4>
+				<div class="value">{stats.lowStockCount.toLocaleString()}</div>
+				<p class="subtext tile-link">
+					{stats.lowStockCount === 0
+						? 'Nothing is below its reorder point'
+						: 'At or below their reorder point →'}
+				</p>
+			</a>
 			<div class="stat-card system-health">
 				<h4>SYSTEM HEALTH</h4>
 				<div class="value text-white">{errorMsg ? 'Error' : 'Stable'}</div>
@@ -261,7 +274,9 @@
 	}
 	.stats-grid {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		/* Five tiles now rather than four, and auto-fit rather than a fixed five
+		   so they wrap instead of squeezing to nothing on a narrow screen. */
+		grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 		gap: 1.5rem;
 		margin-bottom: 1.5rem;
 	}
@@ -291,6 +306,23 @@
 		font-size: 0.8rem;
 		color: #64748b;
 	}
+	.alert-card {
+		display: block;
+		text-decoration: none;
+		color: inherit;
+		transition:
+			border-color 0.2s,
+			box-shadow 0.2s;
+	}
+	.alert-card:hover {
+		border-color: #f59e0b;
+		box-shadow: 0 1px 6px rgb(0 0 0 / 8%);
+	}
+	.tile-link {
+		font-weight: 600;
+		color: #b45309;
+	}
+
 	.system-health {
 		background: #0b6b36;
 		border-color: #0b6b36;

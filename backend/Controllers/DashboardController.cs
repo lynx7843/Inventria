@@ -53,7 +53,13 @@ public class DashboardController : ControllerBase
         // Calculate total items to determine percentages for the frontend
         var totalItems = distribution.Sum(d => d.Count);
 
-        // 5. Recent System Activity (Last 5 transactions)
+        // 5. Items at or below their reorder point - the one figure on this page
+        // that is a job rather than a measurement. LowStock.Lines is what the
+        // reorder report and the employee dashboard read too, so the number here
+        // and the list someone opens next can never disagree.
+        var lowStockCount = await LowStock.Lines(_context).CountAsync();
+
+        // 6. Recent System Activity (Last 5 transactions)
         var movements = await _context.StockMovements
             .OrderByDescending(m => m.Timestamp)
             .Take(5)
@@ -88,6 +94,7 @@ public class DashboardController : ControllerBase
             TotalUsers = totalUsers,
             TotalStockQuantity = totalStockQuantity,
             MonthlyThroughput = monthlyThroughput,
+            LowStockCount = lowStockCount,
             Distribution = distribution,
             TotalUniqueItems = totalItems,
             RecentActivity = recentActivity
@@ -96,14 +103,21 @@ public class DashboardController : ControllerBase
 
     // The counters on the warehouse floor's own dashboard, which until now were
     // four numbers typed into the markup. Each of these is something the database
-    // can actually answer; the two that it could not - a low-stock alert count,
-    // which needs a reorder level no item carries, and an "efficiency rate",
-    // which was never defined as anything - are gone rather than approximated.
+    // can actually answer. The low-stock count was one of the two that it could
+    // not - it needed a reorder level no item carried - and it is back now that
+    // Item records one; the other, an "efficiency rate", was never defined as
+    // anything and stays gone rather than approximated.
     [HttpGet("employee")]
     public async Task<IActionResult> GetEmployeeStats()
     {
         var unitsOnHand = await _context.InventoryBalances.SumAsync(b => (int?)b.Quantity) ?? 0;
         var skusTracked = await _context.Items.CountAsync();
+
+        // Items that have run down to the level they say they need more at. An
+        // item with no reorder point set is not counted - see LowStock - so a
+        // warehouse that has not filled any of them in reads zero rather than
+        // being told everything it owns is running out.
+        var lowStockCount = await LowStock.Lines(_context).CountAsync();
 
         // "Today" is the UTC day, because that is the clock every movement is
         // stamped with. A warehouse that wants its own local day boundary needs
@@ -127,6 +141,7 @@ public class DashboardController : ControllerBase
         {
             UnitsOnHand = unitsOnHand,
             SkusTracked = skusTracked,
+            LowStockCount = lowStockCount,
             ReceivedToday = receivedToday,
             PickedToday = pickedToday
         });
