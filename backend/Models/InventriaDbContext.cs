@@ -118,6 +118,7 @@ public class InventriaDbContext : DbContext
         {
             item.Property(i => i.Sku).HasMaxLength(64);
             item.HasIndex(i => i.Sku).IsUnique();
+            item.Property(i => i.UnitOfMeasure).HasMaxLength(32).HasDefaultValue("unit");
         });
 
         // Zone/Aisle/Shelf together are the address a picker walks to, so two

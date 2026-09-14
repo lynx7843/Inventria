@@ -25,4 +25,17 @@ public class Item
     // 37.
     public int ReorderPoint { get; set; }
     public int ReorderQuantity { get; set; }
+
+    // What one unit of Quantity actually is - "12" means nothing on its own,
+    // and "12 boxes" is a different amount of stock than "12 screws". Defaults
+    // to "unit" so every item that existed before this column did carries an
+    // answer, just an uninformative one, rather than a blank someone has to
+    // notice and fill in. Display-only for now: it does not yet convert
+    // anything, it just says what the number on screen is counting.
+    public string UnitOfMeasure { get; set; } = "unit";
+
+    // How many units make up one pack/case, for items received or shipped by
+    // the case rather than the each - e.g. UnitOfMeasure "case", UnitsPerPack
+    // 24. Null means the item has no such grouping, which is most of them.
+    public int? UnitsPerPack { get; set; }
 }
