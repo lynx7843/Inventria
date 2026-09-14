@@ -37,6 +37,8 @@
 	// meaningful answer here rather than a missing one.
 	let reorderPoint = $state('');
 	let reorderQuantity = $state('');
+	let unitOfMeasure = $state('unit');
+	let unitsPerPack = $state('');
 
 	// 1. Fetch One Page Of Items (Read)
 	async function loadItems() {
@@ -105,7 +107,9 @@
 					name,
 					category,
 					reorderPoint: parseLevel(reorderPoint),
-					reorderQuantity: parseLevel(reorderQuantity)
+					reorderQuantity: parseLevel(reorderQuantity),
+					unitOfMeasure,
+					unitsPerPack: parseLevel(unitsPerPack) || null
 				})
 			});
 
@@ -177,6 +181,8 @@
 		// where a pre-filled zero looks like one already made.
 		reorderPoint = '';
 		reorderQuantity = '';
+		unitOfMeasure = 'unit';
+		unitsPerPack = '';
 		errorMsg = '';
 		showForm = true;
 	}
@@ -191,6 +197,8 @@
 		// rather than as a level someone set.
 		reorderPoint = item.reorderPoint ? String(item.reorderPoint) : '';
 		reorderQuantity = item.reorderQuantity ? String(item.reorderQuantity) : '';
+		unitOfMeasure = item.unitOfMeasure || 'unit';
+		unitsPerPack = item.unitsPerPack ? String(item.unitsPerPack) : '';
 		errorMsg = '';
 		showForm = true;
 	}
@@ -210,6 +218,8 @@
 				'Item Name',
 				'Category',
 				'Quantity On Hand',
+				'Unit Of Measure',
+				'Units Per Pack',
 				'Reorder Point',
 				'Reorder Quantity',
 				'Low Stock'
@@ -220,6 +230,8 @@
 				item.name,
 				item.category,
 				String(item.quantityOnHand),
+				item.unitOfMeasure,
+				item.unitsPerPack ? String(item.unitsPerPack) : '',
 				String(item.reorderPoint),
 				String(item.reorderQuantity),
 				isLowStock(item) ? 'Yes' : 'No'
@@ -302,6 +314,23 @@
 					</div>
 					<div class="input-row">
 						<InputField
+							id="unit-of-measure"
+							label="UNIT OF MEASURE"
+							placeholder="e.g., unit, box, case"
+							bind:value={unitOfMeasure}
+						/>
+						<InputField
+							id="units-per-pack"
+							type="number"
+							label="UNITS PER PACK"
+							placeholder="Leave blank if not packed"
+							bind:value={unitsPerPack}
+							min={1}
+							step={1}
+						/>
+					</div>
+					<div class="input-row">
+						<InputField
 							id="reorder-point"
 							type="number"
 							label="REORDER POINT"
@@ -344,15 +373,16 @@
 						<th>SKU</th>
 						<th>CATEGORY</th>
 						<th>ON HAND</th>
+						<th>UNIT</th>
 						<th>REORDER POINT</th>
 						<th class="text-right">ACTIONS</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if isLoading}
-						<tr><td colspan="7" class="empty-state">Loading database...</td></tr>
+						<tr><td colspan="8" class="empty-state">Loading database...</td></tr>
 					{:else if items.length === 0}
-						<tr><td colspan="7" class="empty-state">No items found. Create one above.</td></tr>
+						<tr><td colspan="8" class="empty-state">No items found. Create one above.</td></tr>
 					{:else}
 						{#each items as item (item.id)}
 							<tr>
@@ -365,6 +395,9 @@
 									{#if isLowStock(item)}
 										<span class="badge low">LOW</span>
 									{/if}
+								</td>
+								<td class="text-muted">
+									{item.unitOfMeasure}{item.unitsPerPack ? ` (${item.unitsPerPack}/pack)` : ''}
 								</td>
 								<!-- An em dash rather than a 0, because the column is not asking how
                      many are needed - it is asking whether anyone has said. -->

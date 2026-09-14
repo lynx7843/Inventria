@@ -177,6 +177,8 @@ public class InventoryController : ControllerBase
                 // item is not tracked for reordering; see Item.
                 i.ReorderPoint,
                 i.ReorderQuantity,
+                i.UnitOfMeasure,
+                i.UnitsPerPack,
                 QuantityOnHand = _context.InventoryBalances
                     .Where(b => b.ItemId == i.Id)
                     .Sum(b => (int?)b.Quantity) ?? 0
@@ -208,7 +210,9 @@ public class InventoryController : ControllerBase
             Name = request.Name.Trim(),
             Category = request.Category.Trim(),
             ReorderPoint = request.ReorderPoint,
-            ReorderQuantity = request.ReorderQuantity
+            ReorderQuantity = request.ReorderQuantity,
+            UnitOfMeasure = string.IsNullOrWhiteSpace(request.UnitOfMeasure) ? "unit" : request.UnitOfMeasure.Trim(),
+            UnitsPerPack = request.UnitsPerPack
         };
 
         _context.Items.Add(newItem);
@@ -236,6 +240,8 @@ public class InventoryController : ControllerBase
         item.Category = request.Category.Trim();
         item.ReorderPoint = request.ReorderPoint;
         item.ReorderQuantity = request.ReorderQuantity;
+        item.UnitOfMeasure = string.IsNullOrWhiteSpace(request.UnitOfMeasure) ? "unit" : request.UnitOfMeasure.Trim();
+        item.UnitsPerPack = request.UnitsPerPack;
 
         try
         {
@@ -534,6 +540,17 @@ public class ItemRequest
 
     [Range(0, int.MaxValue, ErrorMessage = "Reorder quantity cannot be negative.")]
     public int ReorderQuantity { get; set; }
+
+    // Defaults to "unit" rather than being required: an older client that has
+    // never heard of this field sends no value for it, and that should mean
+    // "unit", not a validation error on a request that used to be fine.
+    [StringLength(32, ErrorMessage = "Unit of measure cannot be longer than 32 characters.")]
+    public string UnitOfMeasure { get; set; } = "unit";
+
+    // Null means "no pack grouping for this item", which is most of them, so
+    // it is optional. When given, a pack of zero or fewer is not a pack.
+    [Range(1, int.MaxValue, ErrorMessage = "Units per pack must be at least 1.")]
+    public int? UnitsPerPack { get; set; }
 }
 
 // None of these carry a PerformedBy: attribution comes from the caller's token,

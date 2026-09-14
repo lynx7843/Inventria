@@ -12,6 +12,10 @@ export type Item = {
 	reorderPoint: number;
 	/** The lot size to order in. Zero means "top back up to the point". */
 	reorderQuantity: number;
+	/** What one unit of quantityOnHand is - "unit", "box", "case"... Display-only. */
+	unitOfMeasure: string;
+	/** How many units make up one pack, for items received/shipped by the case. Null if not grouped. */
+	unitsPerPack: number | null;
 };
 
 /**
