@@ -38,4 +38,16 @@ public class Item
     // the case rather than the each - e.g. UnitOfMeasure "case", UnitsPerPack
     // 24. Null means the item has no such grouping, which is most of them.
     public int? UnitsPerPack { get; set; }
+
+    // The current cost of one unit, for turning "how many" into "how much".
+    // Nullable because an item can be catalogued before anyone has priced it,
+    // and a missing cost should leave it out of the total rather than count it
+    // as free. A single current cost, not a cost per movement - see
+    // InventriaDbContext for why, and what moving-average or FIFO costing
+    // would need on top of this.
+    public decimal? UnitCost { get; set; }
+
+    // What the item sells for. Not used in valuation - that is cost, not
+    // price - but priced alongside cost since they are set together.
+    public decimal? SalePrice { get; set; }
 }

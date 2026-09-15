@@ -179,6 +179,8 @@ public class InventoryController : ControllerBase
                 i.ReorderQuantity,
                 i.UnitOfMeasure,
                 i.UnitsPerPack,
+                i.UnitCost,
+                i.SalePrice,
                 QuantityOnHand = _context.InventoryBalances
                     .Where(b => b.ItemId == i.Id)
                     .Sum(b => (int?)b.Quantity) ?? 0
@@ -212,7 +214,9 @@ public class InventoryController : ControllerBase
             ReorderPoint = request.ReorderPoint,
             ReorderQuantity = request.ReorderQuantity,
             UnitOfMeasure = string.IsNullOrWhiteSpace(request.UnitOfMeasure) ? "unit" : request.UnitOfMeasure.Trim(),
-            UnitsPerPack = request.UnitsPerPack
+            UnitsPerPack = request.UnitsPerPack,
+            UnitCost = request.UnitCost,
+            SalePrice = request.SalePrice
         };
 
         _context.Items.Add(newItem);
@@ -242,6 +246,8 @@ public class InventoryController : ControllerBase
         item.ReorderQuantity = request.ReorderQuantity;
         item.UnitOfMeasure = string.IsNullOrWhiteSpace(request.UnitOfMeasure) ? "unit" : request.UnitOfMeasure.Trim();
         item.UnitsPerPack = request.UnitsPerPack;
+        item.UnitCost = request.UnitCost;
+        item.SalePrice = request.SalePrice;
 
         try
         {
@@ -551,6 +557,15 @@ public class ItemRequest
     // it is optional. When given, a pack of zero or fewer is not a pack.
     [Range(1, int.MaxValue, ErrorMessage = "Units per pack must be at least 1.")]
     public int? UnitsPerPack { get; set; }
+
+    // Both null means "not priced yet" - an item can be catalogued before
+    // anyone has costed or priced it, and leaving these unset keeps it out of
+    // the valuation total rather than counting it as free.
+    [Range(typeof(decimal), "0", "79228162514264337593543950335", ErrorMessage = "Unit cost cannot be negative.")]
+    public decimal? UnitCost { get; set; }
+
+    [Range(typeof(decimal), "0", "79228162514264337593543950335", ErrorMessage = "Sale price cannot be negative.")]
+    public decimal? SalePrice { get; set; }
 }
 
 // None of these carry a PerformedBy: attribution comes from the caller's token,
