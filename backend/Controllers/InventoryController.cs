@@ -181,6 +181,7 @@ public class InventoryController : ControllerBase
                 i.UnitsPerPack,
                 i.UnitCost,
                 i.SalePrice,
+                i.Barcode,
                 QuantityOnHand = _context.InventoryBalances
                     .Where(b => b.ItemId == i.Id)
                     .Sum(b => (int?)b.Quantity) ?? 0
@@ -196,6 +197,14 @@ public class InventoryController : ControllerBase
             TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
         });
     }
+
+    // Blank isn't a barcode, it's the absence of one - and unlike Sku/Name,
+    // this field has to actually become null on blank input, not just
+    // trimmed, because the filtered unique index only ignores rows where the
+    // column is NULL. An empty string would still collide with every other
+    // empty string.
+    private static string? NormalizeBarcode(string? barcode) =>
+        string.IsNullOrWhiteSpace(barcode) ? null : barcode.Trim();
 
     // --- MASTER ITEM CRUD OPERATIONS ---
 
@@ -216,7 +225,8 @@ public class InventoryController : ControllerBase
             UnitOfMeasure = string.IsNullOrWhiteSpace(request.UnitOfMeasure) ? "unit" : request.UnitOfMeasure.Trim(),
             UnitsPerPack = request.UnitsPerPack,
             UnitCost = request.UnitCost,
-            SalePrice = request.SalePrice
+            SalePrice = request.SalePrice,
+            Barcode = NormalizeBarcode(request.Barcode)
         };
 
         _context.Items.Add(newItem);
@@ -227,7 +237,7 @@ public class InventoryController : ControllerBase
         }
         catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
         {
-            return BadRequest(new { Message = $"SKU '{sku}' is already used by another item." });
+            return BadRequest(new { Message = $"SKU '{sku}' or barcode is already used by another item." });
         }
 
         return Ok(new { Message = "Item created successfully.", Item = newItem });
@@ -248,6 +258,7 @@ public class InventoryController : ControllerBase
         item.UnitsPerPack = request.UnitsPerPack;
         item.UnitCost = request.UnitCost;
         item.SalePrice = request.SalePrice;
+        item.Barcode = NormalizeBarcode(request.Barcode);
 
         try
         {
@@ -255,7 +266,7 @@ public class InventoryController : ControllerBase
         }
         catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
         {
-            return BadRequest(new { Message = $"SKU '{item.Sku}' is already used by another item." });
+            return BadRequest(new { Message = $"SKU '{item.Sku}' or barcode is already used by another item." });
         }
 
         return Ok(new { Message = "Item updated successfully." });
@@ -566,6 +577,12 @@ public class ItemRequest
 
     [Range(typeof(decimal), "0", "79228162514264337593543950335", ErrorMessage = "Sale price cannot be negative.")]
     public decimal? SalePrice { get; set; }
+
+    // Null/blank means "not barcoded yet" - the column stays that way too;
+    // see NormalizeBarcode. Same length as Sku: it is stored the same way
+    // and needs the same bound for the same reason, a unique index.
+    [StringLength(64, ErrorMessage = "Barcode cannot be longer than 64 characters.")]
+    public string? Barcode { get; set; }
 }
 
 // None of these carry a PerformedBy: attribution comes from the caller's token,

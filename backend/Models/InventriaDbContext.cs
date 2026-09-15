@@ -129,6 +129,15 @@ public class InventriaDbContext : DbContext
             // 2 behind it, which is all money needs.
             item.Property(i => i.UnitCost).HasPrecision(18, 2);
             item.Property(i => i.SalePrice).HasPrecision(18, 2);
+
+            // An ordinary unique index treats every NULL as equal to every
+            // other NULL, so the moment a second item went unbarcoded the
+            // index would refuse to let it save. Filtering the index to rows
+            // that actually have a barcode is what makes "not barcoded yet"
+            // possible for more than one item at a time, while still refusing
+            // two items claiming the same code.
+            item.Property(i => i.Barcode).HasMaxLength(64);
+            item.HasIndex(i => i.Barcode).IsUnique().HasFilter("[Barcode] IS NOT NULL");
         });
 
         // Zone/Aisle/Shelf together are the address a picker walks to, so two
