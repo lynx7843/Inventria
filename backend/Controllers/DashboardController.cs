@@ -30,6 +30,15 @@ public class DashboardController : ControllerBase
         // 2. Total Physical Stock (Sum of all quantities in all bins)
         var totalStockQuantity = await _context.InventoryBalances.SumAsync(b => (int?)b.Quantity) ?? 0;
 
+        // 2b. Total Inventory Value: quantity on hand times unit cost, summed
+        // across every balance. An item with no UnitCost set contributes
+        // nothing to the total rather than being treated as free stock -
+        // SumAsync over a nullable decimal skips nulls in the multiplication
+        // only if handled explicitly, so each line coalesces to 0 itself.
+        var totalInventoryValue = await _context.InventoryBalances
+            .Join(_context.Items, b => b.ItemId, i => i.Id, (b, i) => b.Quantity * (i.UnitCost ?? 0))
+            .SumAsync();
+
         // 3. Monthly Throughput (Total units moved in the last 30 days)
         var thirtyDaysAgo = DateTime.UtcNow.AddDays(-30);
         // A relocation writes two rows - out of the source bin, into the
@@ -93,6 +102,7 @@ public class DashboardController : ControllerBase
         return Ok(new {
             TotalUsers = totalUsers,
             TotalStockQuantity = totalStockQuantity,
+            TotalInventoryValue = totalInventoryValue,
             MonthlyThroughput = monthlyThroughput,
             LowStockCount = lowStockCount,
             Distribution = distribution,

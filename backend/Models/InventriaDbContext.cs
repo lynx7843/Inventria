@@ -119,6 +119,16 @@ public class InventriaDbContext : DbContext
             item.Property(i => i.Sku).HasMaxLength(64);
             item.HasIndex(i => i.Sku).IsUnique();
             item.Property(i => i.UnitOfMeasure).HasMaxLength(32).HasDefaultValue("unit");
+
+            // decimal, never double: binary floating point cannot represent
+            // 0.10 exactly, and an error that small compounds over a
+            // warehouse's worth of quantities. Precision is spelled out here
+            // rather than left to EF's default (which triggers a warning and
+            // leaves SQL Server to pick one on its own) - 18,2 is 16 digits
+            // ahead of the decimal point, more than any unit cost needs, and
+            // 2 behind it, which is all money needs.
+            item.Property(i => i.UnitCost).HasPrecision(18, 2);
+            item.Property(i => i.SalePrice).HasPrecision(18, 2);
         });
 
         // Zone/Aisle/Shelf together are the address a picker walks to, so two
