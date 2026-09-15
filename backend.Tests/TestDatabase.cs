@@ -66,7 +66,8 @@ public sealed class TestDatabase : IDisposable
         string name = "Steel Wrench",
         string category = "Tools",
         int reorderPoint = 0,
-        int reorderQuantity = 0)
+        int reorderQuantity = 0,
+        bool isArchived = false)
     {
         var item = new Item
         {
@@ -74,7 +75,8 @@ public sealed class TestDatabase : IDisposable
             Name = name,
             Category = category,
             ReorderPoint = reorderPoint,
-            ReorderQuantity = reorderQuantity
+            ReorderQuantity = reorderQuantity,
+            IsArchived = isArchived
         };
         Context.Items.Add(item);
         Context.SaveChanges();

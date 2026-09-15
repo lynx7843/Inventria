@@ -144,6 +144,55 @@ public class InventoryCatalogueTests
         Assert.Equal(0, ApiResult.Property(row, "QuantityOnHand").GetInt32());
     }
 
+    // --- ARCHIVING ---------------------------------------------------------
+
+    [Fact]
+    public void An_archived_item_is_hidden_from_the_default_catalogue_listing()
+    {
+        using var db = new TestDatabase();
+        db.AddItem("SKU-1", "Live Item");
+        db.AddItem("SKU-2", "Retired Item", isArchived: true);
+
+        var result = ControllerFor(db).GetAllItems();
+
+        Assert.Equal(["Live Item"], NamesIn(result));
+        Assert.Equal(1, ApiResult.Number(result, "TotalCount"));
+    }
+
+    [Fact]
+    public void IncludeArchived_brings_archived_items_back_into_the_listing()
+    {
+        using var db = new TestDatabase();
+        db.AddItem("SKU-1", "Live Item");
+        db.AddItem("SKU-2", "Retired Item", isArchived: true);
+
+        var result = ControllerFor(db).GetAllItems(includeArchived: true);
+
+        Assert.Equal(["Live Item", "Retired Item"], NamesIn(result));
+        Assert.Equal(2, ApiResult.Number(result, "TotalCount"));
+    }
+
+    [Fact]
+    public void Receiving_stock_into_an_archived_item_is_refused()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem(isArchived: true);
+        var bin = db.AddBin();
+
+        var result = ControllerFor(db).ReceiveStock(new ReceiveStockRequest
+        {
+            ItemId = item.Id,
+            WarehouseBinId = bin.Id,
+            Quantity = 10
+        });
+
+        Assert.IsType<ConflictObjectResult>(result);
+        Assert.Contains("archived", ApiResult.Message(result));
+
+        using var check = db.NewContext();
+        Assert.Empty(check.InventoryBalances);
+    }
+
     // --- CREATE AND UPDATE -----------------------------------------------
 
     [Fact]

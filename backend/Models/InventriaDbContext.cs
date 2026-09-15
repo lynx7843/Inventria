@@ -150,6 +150,13 @@ public class InventriaDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(i => i.SupplierId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Same reasoning as NotifyLowStock on User: a bare property
+            // initializer only sets what a newly constructed Item looks like
+            // in memory, not the column default EF infers, so it is spelled
+            // out here to keep the model and the `has-pending-model-changes`
+            // check agreeing with it.
+            item.Property(i => i.IsArchived).HasDefaultValue(false);
         });
 
         // Contact fields are free text with no uniqueness or length concern

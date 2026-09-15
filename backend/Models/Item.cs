@@ -65,4 +65,12 @@ public class Item
     // See InventriaDbContext for why deleting a supplier doesn't cascade here.
     public int? SupplierId { get; set; }
     public Supplier? Supplier { get; set; }
+
+    // A discontinued item that has stock or movement history behind it can't
+    // be deleted - see RestrictItemDeletion - and shouldn't be: the history is
+    // exactly what a delete would strand. Archiving is the other way to make
+    // it stop being the thing you see and receive into, without touching
+    // anything it already recorded. Defaults false so every item that existed
+    // before this column did stays visible exactly as before.
+    public bool IsArchived { get; set; }
 }

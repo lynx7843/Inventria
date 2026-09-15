@@ -178,6 +178,35 @@ public class ReportsTests
         Assert.Equal("deleted item #4242", ApiResult.Property(row, "ItemName").GetString());
     }
 
+    [Fact]
+    public void Archiving_an_item_does_not_remove_it_from_movement_history()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+        var inventory = new InventoryController(db.Context) { ControllerContext = ApiResult.SignedInAs("alice") };
+
+        inventory.ReceiveStock(new ReceiveStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 10 });
+        inventory.PickStock(new PickStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 10 });
+
+        // Archiving is meant to hide the item from the catalogue and stop new
+        // receives - not to touch anything it already recorded. Its own
+        // movement history is exactly what deleting it would have stranded;
+        // this is the regression that would say archiving quietly did the
+        // same thing.
+        using (var archiving = db.NewContext())
+        {
+            var toArchive = archiving.Items.Single(i => i.Id == item.Id);
+            toArchive.IsArchived = true;
+            archiving.SaveChanges();
+        }
+
+        var result = ControllerFor(db).GetMovements(
+            from: null, to: null, type: null, itemId: item.Id, performedBy: null, page: 1, pageSize: 25);
+
+        Assert.Equal(2, ApiResult.Number(result, "TotalCount"));
+    }
+
     // --- DEAD STOCK ----------------------------------------------------------
 
     [Fact]

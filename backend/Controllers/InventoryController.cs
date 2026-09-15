@@ -139,7 +139,10 @@ public class InventoryController : ControllerBase
     private const int MaxPageSize = 200;
 
     [HttpGet]
-    public IActionResult GetAllItems([FromQuery] int page = 1, [FromQuery] int pageSize = DefaultPageSize)
+    public IActionResult GetAllItems(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = DefaultPageSize,
+        [FromQuery] bool includeArchived = false)
     {
         // Clamped rather than rejected: page 0 and a page size of 5000 are a
         // caller asking for the nearest sensible thing, not a malformed request,
@@ -154,7 +157,17 @@ public class InventoryController : ControllerBase
         // one and page two, or on neither. By name because that is the column
         // people read down; by Id after it so items sharing a name still have a
         // fixed order.
-        var query = _context.Items.OrderBy(i => i.Name).ThenBy(i => i.Id);
+        var query = _context.Items.AsQueryable();
+
+        // Defaults to hiding archived items, but only filters when the caller
+        // hasn't asked for them - an explicit opt-in rather than a second
+        // endpoint, so the archive can still be browsed without inventing a
+        // new route for it. Archived items stay fully queryable everywhere
+        // else (movement history, reports) - this filter is the catalogue's
+        // alone.
+        if (!includeArchived) query = query.Where(i => !i.IsArchived);
+
+        query = query.OrderBy(i => i.Name).ThenBy(i => i.Id);
 
         var totalCount = query.Count();
 
@@ -182,6 +195,7 @@ public class InventoryController : ControllerBase
                 i.UnitCost,
                 i.SalePrice,
                 i.Barcode,
+                i.IsArchived,
                 QuantityOnHand = _context.InventoryBalances
                     .Where(b => b.ItemId == i.Id)
                     .Sum(b => (int?)b.Quantity) ?? 0
@@ -226,7 +240,8 @@ public class InventoryController : ControllerBase
             UnitsPerPack = request.UnitsPerPack,
             UnitCost = request.UnitCost,
             SalePrice = request.SalePrice,
-            Barcode = NormalizeBarcode(request.Barcode)
+            Barcode = NormalizeBarcode(request.Barcode),
+            IsArchived = request.IsArchived
         };
 
         _context.Items.Add(newItem);
@@ -259,6 +274,7 @@ public class InventoryController : ControllerBase
         item.UnitCost = request.UnitCost;
         item.SalePrice = request.SalePrice;
         item.Barcode = NormalizeBarcode(request.Barcode);
+        item.IsArchived = request.IsArchived;
 
         try
         {
@@ -328,6 +344,15 @@ public class InventoryController : ControllerBase
         if (item == null)
         {
             return NotFound(new { Message = $"Item with ID {request.ItemId} not found." });
+        }
+
+        // An archived item is retired, not deleted - it stays intact for
+        // history and reports, but new stock arriving for it would be the
+        // catalogue quietly un-retiring it. Unarchive it first if that is
+        // really what is meant.
+        if (item.IsArchived)
+        {
+            return Conflict(new { Message = $"'{item.Name}' is archived and cannot receive new stock. Unarchive it first." });
         }
 
         // 3. Verify the destination warehouse bin exists
@@ -583,6 +608,12 @@ public class ItemRequest
     // and needs the same bound for the same reason, a unique index.
     [StringLength(64, ErrorMessage = "Barcode cannot be longer than 64 characters.")]
     public string? Barcode { get; set; }
+
+    // Defaults to false so a client that has never heard of archiving keeps
+    // creating and editing items exactly as before. This is also how an item
+    // gets archived and unarchived: through the same edit form as everything
+    // else, rather than a separate endpoint for one boolean.
+    public bool IsArchived { get; set; }
 }
 
 // None of these carry a PerformedBy: attribution comes from the caller's token,
