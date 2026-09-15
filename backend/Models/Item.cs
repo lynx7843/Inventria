@@ -50,4 +50,12 @@ public class Item
     // What the item sells for. Not used in valuation - that is cost, not
     // price - but priced alongside cost since they are set together.
     public decimal? SalePrice { get; set; }
+
+    // The code printed on the item's label. Null until someone assigns one -
+    // an item can be catalogued before it is barcoded - so the uniqueness
+    // constraint on this column has to be filtered; see InventriaDbContext for
+    // why an unfiltered one would make every unbarcoded item collide with
+    // every other. A USB/Bluetooth scanner or a camera scan both just need
+    // somewhere to type this value into and something to look it up by.
+    public string? Barcode { get; set; }
 }
