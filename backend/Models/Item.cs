@@ -58,4 +58,11 @@ public class Item
     // every other. A USB/Bluetooth scanner or a camera scan both just need
     // somewhere to type this value into and something to look it up by.
     public string? Barcode { get; set; }
+
+    // Who to buy more of this from. Null is the default and the safe state -
+    // every item that existed before this column did has no supplier on file
+    // rather than a guessed one, and nothing currently requires one to be set.
+    // See InventriaDbContext for why deleting a supplier doesn't cascade here.
+    public int? SupplierId { get; set; }
+    public Supplier? Supplier { get; set; }
 }

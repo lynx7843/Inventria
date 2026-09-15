@@ -13,6 +13,7 @@ public class InventriaDbContext : DbContext
     public DbSet<WarehouseBin> WarehouseBins { get; set; }
     public DbSet<InventoryBalance> InventoryBalances { get; set; }
     public DbSet<StockMovement> StockMovements { get; set; }
+    public DbSet<Supplier> Suppliers { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -138,7 +139,23 @@ public class InventriaDbContext : DbContext
             // two items claiming the same code.
             item.Property(i => i.Barcode).HasMaxLength(64);
             item.HasIndex(i => i.Barcode).IsUnique().HasFilter("[Barcode] IS NOT NULL");
+
+            // Same reasoning as Item's other two foreign keys above: a
+            // supplier going out of the picture is a fact about the supplier,
+            // not permission to erase which items used to be sourced from
+            // them. Restrict means retiring a supplier requires clearing it
+            // off items first, which is the point - it forces a conscious
+            // reassignment rather than a silent one.
+            item.HasOne(i => i.Supplier)
+                .WithMany()
+                .HasForeignKey(i => i.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
+
+        // Contact fields are free text with no uniqueness or length concern
+        // beyond the ordinary nvarchar(max) default, so Supplier needs no
+        // configuration block of its own beyond the relationship declared on
+        // Item above.
 
         // Zone/Aisle/Shelf together are the address a picker walks to, so two
         // rows with the same three values are two Ids for one physical shelf -
