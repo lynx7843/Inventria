@@ -67,7 +67,8 @@ public sealed class TestDatabase : IDisposable
         string category = "Tools",
         int reorderPoint = 0,
         int reorderQuantity = 0,
-        bool isArchived = false)
+        bool isArchived = false,
+        bool tracksLots = false)
     {
         var item = new Item
         {
@@ -76,7 +77,8 @@ public sealed class TestDatabase : IDisposable
             Category = category,
             ReorderPoint = reorderPoint,
             ReorderQuantity = reorderQuantity,
-            IsArchived = isArchived
+            IsArchived = isArchived,
+            TracksLots = tracksLots
         };
         Context.Items.Add(item);
         Context.SaveChanges();
@@ -116,6 +118,24 @@ public sealed class TestDatabase : IDisposable
     {
         var balance = new InventoryBalance { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = quantity };
         Context.InventoryBalances.Add(balance);
+        Context.SaveChanges();
+        return balance;
+    }
+
+    /// <summary>A named batch of a lot-tracked item, with an optional expiration date.</summary>
+    public Lot AddLot(Item item, string lotNumber = "LOT-1", DateTime? expirationDate = null)
+    {
+        var lot = new Lot { ItemId = item.Id, LotNumber = lotNumber, ExpirationDate = expirationDate };
+        Context.Lots.Add(lot);
+        Context.SaveChanges();
+        return lot;
+    }
+
+    /// <summary>Puts a lot's stock on a shelf without going through the API.</summary>
+    public InventoryLotBalance AddLotBalance(Item item, WarehouseBin bin, Lot lot, int quantity)
+    {
+        var balance = new InventoryLotBalance { ItemId = item.Id, WarehouseBinId = bin.Id, LotId = lot.Id, Quantity = quantity };
+        Context.InventoryLotBalances.Add(balance);
         Context.SaveChanges();
         return balance;
     }
@@ -163,6 +183,10 @@ public sealed class TestDatabase : IDisposable
             // gets rows written; it does not change on update, so the token
             // never trips and concurrency is simply not under test here.
             modelBuilder.Entity<InventoryBalance>()
+                .Property(balance => balance.RowVersion)
+                .HasDefaultValueSql("randomblob(8)");
+
+            modelBuilder.Entity<InventoryLotBalance>()
                 .Property(balance => balance.RowVersion)
                 .HasDefaultValueSql("randomblob(8)");
         }

@@ -5,9 +5,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Inventria.Controllers;
 
-// Signed in is the floor; the admin figures below ask for more than that on the
-// action itself. Both attributes have to pass, so moving the role check down
-// opened the employee counters to Employees without loosening anything else.
 [Authorize]
 [Route("api/[controller]")]
 [ApiController]
@@ -27,24 +24,20 @@ public class DashboardController : ControllerBase
         // 1. Total Users
         var totalUsers = await _context.Users.CountAsync();
 
-        // 2. Total Physical Stock (Sum of all quantities in all bins)
-        var totalStockQuantity = await _context.InventoryBalances.SumAsync(b => (int?)b.Quantity) ?? 0;
+        var totalStockQuantity = (await _context.InventoryBalances.SumAsync(b => (int?)b.Quantity) ?? 0)
+            + (await _context.InventoryLotBalances.SumAsync(b => (int?)b.Quantity) ?? 0);
 
-        // 2b. Total Inventory Value: quantity on hand times unit cost, summed
-        // across every balance. An item with no UnitCost set contributes
-        // nothing to the total rather than being treated as free stock -
-        // SumAsync over a nullable decimal skips nulls in the multiplication
-        // only if handled explicitly, so each line coalesces to 0 itself.
+
         var totalInventoryValue = await _context.InventoryBalances
             .Join(_context.Items, b => b.ItemId, i => i.Id, (b, i) => b.Quantity * (i.UnitCost ?? 0))
-            .SumAsync();
+            .SumAsync()
+            + await _context.InventoryLotBalances
+                .Join(_context.Items, b => b.ItemId, i => i.Id, (b, i) => b.Quantity * (i.UnitCost ?? 0))
+                .SumAsync();
 
         // 3. Monthly Throughput (Total units moved in the last 30 days)
         var thirtyDaysAgo = DateTime.UtcNow.AddDays(-30);
-        // A relocation writes two rows - out of the source bin, into the
-        // destination - so adding up every row would count those units twice.
-        // Throughput is units moved, and stock moved once, so only the outbound
-        // leg counts here.
+
         var monthlyThroughput = await _context.StockMovements
             .Where(m => m.Timestamp >= thirtyDaysAgo)
             .Where(m => m.TransactionType != "RELOCATE" || m.QuantityChanged < 0)
@@ -62,10 +55,6 @@ public class DashboardController : ControllerBase
         // Calculate total items to determine percentages for the frontend
         var totalItems = distribution.Sum(d => d.Count);
 
-        // 5. Items at or below their reorder point - the one figure on this page
-        // that is a job rather than a measurement. LowStock.Lines is what the
-        // reorder report and the employee dashboard read too, so the number here
-        // and the list someone opens next can never disagree.
         var lowStockCount = await LowStock.Lines(_context).CountAsync();
 
         // 6. Recent System Activity (Last 5 transactions)
@@ -84,10 +73,6 @@ public class DashboardController : ControllerBase
             })
             .ToListAsync();
 
-        // Item deletion can no longer strand a movement, but rows written before
-        // that was true still point at an item that is gone and the join returns
-        // nothing for them. Naming the Id that went missing beats rendering the
-        // sentence with a hole where the item should be.
         var recentActivity = movements
             .Select(m => new {
                 m.TransactionType,
@@ -111,34 +96,19 @@ public class DashboardController : ControllerBase
         });
     }
 
-    // The counters on the warehouse floor's own dashboard, which until now were
-    // four numbers typed into the markup. Each of these is something the database
-    // can actually answer. The low-stock count was one of the two that it could
-    // not - it needed a reorder level no item carried - and it is back now that
-    // Item records one; the other, an "efficiency rate", was never defined as
-    // anything and stays gone rather than approximated.
     [HttpGet("employee")]
     public async Task<IActionResult> GetEmployeeStats()
     {
-        var unitsOnHand = await _context.InventoryBalances.SumAsync(b => (int?)b.Quantity) ?? 0;
+        var unitsOnHand = (await _context.InventoryBalances.SumAsync(b => (int?)b.Quantity) ?? 0)
+            + (await _context.InventoryLotBalances.SumAsync(b => (int?)b.Quantity) ?? 0);
         var skusTracked = await _context.Items.CountAsync();
 
-        // Items that have run down to the level they say they need more at. An
-        // item with no reorder point set is not counted - see LowStock - so a
-        // warehouse that has not filled any of them in reads zero rather than
-        // being told everything it owns is running out.
         var lowStockCount = await LowStock.Lines(_context).CountAsync();
 
-        // "Today" is the UTC day, because that is the clock every movement is
-        // stamped with. A warehouse that wants its own local day boundary needs
-        // to say which timezone it is in, and nothing here records that yet.
         var startOfDay = DateTime.UtcNow.Date;
 
         var movementsToday = _context.StockMovements.Where(m => m.Timestamp >= startOfDay);
 
-        // RECEIVE and PICK only: a relocation moves units between bins without
-        // any arriving or leaving, and counting its legs here would make a shuffle
-        // look like a day's work.
         var receivedToday = await movementsToday
             .Where(m => m.TransactionType == "RECEIVE")
             .SumAsync(m => (int?)m.QuantityChanged) ?? 0;

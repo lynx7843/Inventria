@@ -102,6 +102,16 @@ public class WarehouseBinsController : ControllerBase
             return Conflict(new { Message = $"Bin {Describe(bin)} holds {quantities.Sum()} units across {quantities.Count} item(s). Move or pick the stock out before deleting it." });
         }
 
+        var lotQuantities = _context.InventoryLotBalances
+            .Where(b => b.WarehouseBinId == id && b.Quantity != 0)
+            .Select(b => b.Quantity)
+            .ToList();
+
+        if (lotQuantities.Count > 0)
+        {
+            return Conflict(new { Message = $"Bin {Describe(bin)} holds {lotQuantities.Sum()} units across {lotQuantities.Count} lot(s). Move or pick the stock out before deleting it." });
+        }
+
         var movementCount = _context.StockMovements.Count(m => m.WarehouseBinId == id);
         if (movementCount > 0)
         {

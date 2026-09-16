@@ -49,6 +49,11 @@ public class ReportsController : ControllerBase
     {
         (page, pageSize) = ClampPaging(page, pageSize);
 
+        // Lot-tracked stock lives in InventoryLotBalance, not here, so a
+        // lot-tracked item shows no rows on this per-bin report - see
+        // Item.TracksLots. Widening this one to a fourth column (lot number)
+        // is a reporting feature of its own, not something receiving, picking
+        // or relocating stock depends on.
         var query = _context.InventoryBalances
             .Select(b => new
             {
@@ -210,9 +215,15 @@ public class ReportsController : ControllerBase
                 item.Sku,
                 item.Name,
                 item.Category,
-                QuantityOnHand = _context.InventoryBalances
-                    .Where(b => b.ItemId == item.Id)
-                    .Sum(b => (int?)b.Quantity) ?? 0,
+                // Same two-table sum as InventoryController.GetAllItems - a
+                // lot-tracked item with real stock would otherwise read as 0
+                // here and be reported dead regardless of how recently it moved.
+                QuantityOnHand = (_context.InventoryBalances
+                        .Where(b => b.ItemId == item.Id)
+                        .Sum(b => (int?)b.Quantity) ?? 0)
+                    + (_context.InventoryLotBalances
+                        .Where(b => b.ItemId == item.Id)
+                        .Sum(b => (int?)b.Quantity) ?? 0),
                 LastMovementAt = (DateTime?)(lm == null ? null : lm.LastMovementAt)
             };
 

@@ -19,39 +19,13 @@ public class InventoryController : ControllerBase
         _context = context;
     }
 
-    // The only trustworthy answer to "who did this" is the signed token. Taking
-    // it from the request body let any authenticated caller stamp a colleague's
-    // name on a movement, which is the one field the audit log rests on.
-    // [Authorize] guarantees an authenticated principal, so the claim is present.
     private string CurrentUsername => User.FindFirstValue(ClaimTypes.Name)!;
 
-    // The account behind the token, for reading its notification preferences.
-    // Same claim UserProfileController resolves the caller from, and [Authorize]
-    // guarantees it is present.
     private int CurrentUserId => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-    /// <summary>
-    /// The sentence to hand back when a pick has just taken an item to or below
-    /// its reorder point, or null when it has not - or when the person who did
-    /// the picking has turned low-stock alerts off.
-    /// </summary>
-    /// <remarks>
-    /// This is where a low-stock alert is worth delivering: the moment stock
-    /// falls, to the person who just made it fall, while they are still standing
-    /// at the shelf. A receive can only push an item further from its point and a
-    /// relocation moves units between bins without changing the total, so neither
-    /// can start an alert that this has not already raised.
-    ///
-    /// It reads the item's total across every bin rather than the bin just picked
-    /// from, because a reorder point is a question about the warehouse, not about
-    /// one shelf: an item with 2 left in this bin and 400 in the next one does
-    /// not need buying.
-    /// </remarks>
     private string? LowStockNoticeFor(int itemId)
     {
-        // The preference lives on the account row. A token naming an id with no
-        // row behind it is not a reason to withhold a warning about stock, so the
-        // default the User model declares - on - applies.
+
         var wantsAlerts = _context.Users
             .Where(u => u.Id == CurrentUserId)
             .Select(u => (bool?)u.NotifyLowStock)
@@ -72,26 +46,8 @@ public class InventoryController : ControllerBase
              + $"at or below its reorder point of {line.ReorderPoint}.{order}";
     }
 
-    // How many times a stock move re-runs after losing a race. Conflicts only
-    // happen when two requests touch the same item/bin at the same moment; past
-    // this many losses the bin is hot enough that the caller should be told to
-    // try again rather than kept waiting.
-    //
-    // Four was not enough in practice. Eight scanners receiving into one bin at
-    // once had two of them give up and answer 409 - not a lost unit, the ledger
-    // stayed exact, but a person told to do their job again for no reason they
-    // can see. The losers of each round all retried on the same instant and
-    // collided again, so the pause below matters more than the count does.
     private const int MaxConcurrencyAttempts = 8;
 
-    // Runs a stock move that reads balances and then saves them, retrying from
-    // scratch if another request changed the same rows in between.
-    //
-    // Each attempt must re-read the balances it depends on, which is why the
-    // change tracker is cleared between attempts: a retry has to see the winner's
-    // new quantity and re-run its own "enough stock?" check against it, and it
-    // has to drop the StockMovement the failed attempt had queued up. A single
-    // SaveChanges is already one transaction, so a failed attempt writes nothing.
     private IActionResult ExecuteStockMove(Func<IActionResult> move)
     {
         for (var attempt = 1; attempt <= MaxConcurrencyAttempts; attempt++)
@@ -121,20 +77,10 @@ public class InventoryController : ControllerBase
         return Conflict(new { Message = "This stock is being updated by another request. Please try again." });
     }
 
-    // Everyone who lost the same round is holding the same stale read and is
-    // ready to retry at the same moment, so retrying immediately reproduces the
-    // pile-up that caused the loss. Waiting a random few milliseconds, growing
-    // with each attempt, is what breaks the tie - without it, extra attempts
-    // mostly buy extra collisions. The numbers are small because the work being
     // retried is one short transaction, not because they were measured.
     private static void PauseBeforeRetrying(int attempt) =>
         Thread.Sleep(Random.Shared.Next(4, 16) * attempt);
 
-    // What a caller gets when it asks for a page without saying how big, and the
-    // most it can ask for in one go. The ceiling is the point of the exercise: a
-    // catalogue grows without anyone deciding it should, and this used to answer
-    // with all of it - every row, each carrying its own balance lookup - which
-    // gets slower for every item the warehouse has ever stocked.
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 200;
 
@@ -196,9 +142,18 @@ public class InventoryController : ControllerBase
                 i.SalePrice,
                 i.Barcode,
                 i.IsArchived,
-                QuantityOnHand = _context.InventoryBalances
-                    .Where(b => b.ItemId == i.Id)
-                    .Sum(b => (int?)b.Quantity) ?? 0
+                i.TracksLots,
+                // A lot-tracked item keeps no rows in InventoryBalance at
+                // all - its stock lives in InventoryLotBalance instead - so
+                // summing both is what makes this column mean the same
+                // thing regardless of which path an item takes. Exactly one
+                // of the two sums is ever non-zero for a given item.
+                QuantityOnHand = (_context.InventoryBalances
+                        .Where(b => b.ItemId == i.Id)
+                        .Sum(b => (int?)b.Quantity) ?? 0)
+                    + (_context.InventoryLotBalances
+                        .Where(b => b.ItemId == i.Id)
+                        .Sum(b => (int?)b.Quantity) ?? 0)
             })
             .ToList();
 
@@ -219,6 +174,27 @@ public class InventoryController : ControllerBase
     // empty string.
     private static string? NormalizeBarcode(string? barcode) =>
         string.IsNullOrWhiteSpace(barcode) ? null : barcode.Trim();
+
+    // Same reasoning as NormalizeBarcode: blank is "no lot number given",
+    // not a lot number that happens to be blank.
+    private static string? NormalizeLotNumber(string? lotNumber) =>
+        string.IsNullOrWhiteSpace(lotNumber) ? null : lotNumber.Trim();
+
+    // Finds the lot a receive is adding to, or opens a new one for a lot
+    // number this item has not seen before. Only ever called for an item with
+    // TracksLots set, and only from inside a move that will save it - a
+    // freshly created lot has no Id until SaveChanges runs, which is why
+    // everything downstream (the balance row, the movement) hangs it off the
+    // Lot navigation instead of reading LotId up front.
+    private Lot FindOrOpenLot(int itemId, string lotNumber, DateTime? expirationDate)
+    {
+        var lot = _context.Lots.FirstOrDefault(l => l.ItemId == itemId && l.LotNumber == lotNumber);
+        if (lot != null) return lot;
+
+        lot = new Lot { ItemId = itemId, LotNumber = lotNumber, ExpirationDate = expirationDate };
+        _context.Lots.Add(lot);
+        return lot;
+    }
 
     // --- MASTER ITEM CRUD OPERATIONS ---
 
@@ -241,7 +217,8 @@ public class InventoryController : ControllerBase
             UnitCost = request.UnitCost,
             SalePrice = request.SalePrice,
             Barcode = NormalizeBarcode(request.Barcode),
-            IsArchived = request.IsArchived
+            IsArchived = request.IsArchived,
+            TracksLots = request.TracksLots
         };
 
         _context.Items.Add(newItem);
@@ -264,6 +241,25 @@ public class InventoryController : ControllerBase
         var item = _context.Items.Find(id);
         if (item == null) return NotFound(new { Message = "Item not found." });
 
+        // Turning lot tracking off would leave whatever is sitting in
+        // InventoryLotBalance stranded from the path receive/pick/relocate
+        // would use from then on - a future receive would open a plain
+        // InventoryBalance row alongside lots nobody can pick from through
+        // the now-untracked flow. Refused while any lot still holds stock,
+        // the same way deleting an item with stock on hand is refused.
+        if (item.TracksLots && !request.TracksLots)
+        {
+            var lotUnits = _context.InventoryLotBalances
+                .Where(b => b.ItemId == id && b.Quantity != 0)
+                .Select(b => b.Quantity)
+                .ToList();
+
+            if (lotUnits.Count > 0)
+            {
+                return Conflict(new { Message = $"'{item.Name}' has {lotUnits.Sum()} units on hand across {lotUnits.Count} lot(s). Move or pick that stock out before turning off lot tracking." });
+            }
+        }
+
         item.Sku = request.Sku.Trim();
         item.Name = request.Name.Trim();
         item.Category = request.Category.Trim();
@@ -275,6 +271,7 @@ public class InventoryController : ControllerBase
         item.SalePrice = request.SalePrice;
         item.Barcode = NormalizeBarcode(request.Barcode);
         item.IsArchived = request.IsArchived;
+        item.TracksLots = request.TracksLots;
 
         try
         {
@@ -307,6 +304,16 @@ public class InventoryController : ControllerBase
         if (quantities.Count > 0)
         {
             return Conflict(new { Message = $"'{item.Name}' has {quantities.Sum()} units on hand across {quantities.Count} bin(s). Move or pick the stock out before deleting it." });
+        }
+
+        var lotQuantities = _context.InventoryLotBalances
+            .Where(b => b.ItemId == id && b.Quantity != 0)
+            .Select(b => b.Quantity)
+            .ToList();
+
+        if (lotQuantities.Count > 0)
+        {
+            return Conflict(new { Message = $"'{item.Name}' has {lotQuantities.Sum()} units on hand across {lotQuantities.Count} lot(s). Move or pick the stock out before deleting it." });
         }
 
         var movementCount = _context.StockMovements.Count(m => m.ItemId == id);
@@ -362,47 +369,101 @@ public class InventoryController : ControllerBase
             return NotFound(new { Message = $"Warehouse Bin with ID {request.WarehouseBinId} not found." });
         }
 
+        // A lot-tracked item cannot receive into the plain, unlabelled path -
+        // every unit on its shelves has to belong to a named batch, or a
+        // later recall has no way to say which units are which.
+        var lotNumber = NormalizeLotNumber(request.LotNumber);
+        if (item.TracksLots && lotNumber == null)
+        {
+            return BadRequest(new { Message = $"'{item.Name}' tracks lots. Give the lot/batch number this stock belongs to." });
+        }
+
         return ExecuteStockMove(() =>
         {
-            // 4. Update or Create the Inventory Balance
-            var balance = _context.InventoryBalances
-                .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
+            int newTotalBalance;
 
-            if (balance != null)
+            if (item.TracksLots)
             {
-                // If the item is already in this bin, just add to the existing quantity
-                balance.Quantity += request.Quantity;
-            }
-            else
-            {
-                // If this is the first time this item is placed in this bin, create a new record
-                balance = new InventoryBalance
+                var lot = FindOrOpenLot(request.ItemId, lotNumber!, request.ExpirationDate);
+
+                var lotBalance = lot.Id != 0
+                    ? _context.InventoryLotBalances.FirstOrDefault(b =>
+                        b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId && b.LotId == lot.Id)
+                    : null;
+
+                if (lotBalance != null)
+                {
+                    lotBalance.Quantity += request.Quantity;
+                }
+                else
+                {
+                    lotBalance = new InventoryLotBalance
+                    {
+                        ItemId = request.ItemId,
+                        WarehouseBinId = request.WarehouseBinId,
+                        Quantity = request.Quantity,
+                        Lot = lot
+                    };
+                    _context.InventoryLotBalances.Add(lotBalance);
+                }
+
+                _context.StockMovements.Add(new StockMovement
                 {
                     ItemId = request.ItemId,
                     WarehouseBinId = request.WarehouseBinId,
-                    Quantity = request.Quantity
-                };
-                _context.InventoryBalances.Add(balance);
+                    TransactionType = "RECEIVE",
+                    QuantityChanged = request.Quantity,
+                    Timestamp = DateTime.UtcNow,
+                    PerformedBy = CurrentUsername,
+                    Lot = lot
+                });
+
+                _context.SaveChanges();
+                newTotalBalance = lotBalance.Quantity;
             }
-
-            // 5. Log the Stock Movement for auditing
-            var movement = new StockMovement
+            else
             {
-                ItemId = request.ItemId,
-                WarehouseBinId = request.WarehouseBinId,
-                TransactionType = "RECEIVE",
-                QuantityChanged = request.Quantity,
-                Timestamp = DateTime.UtcNow,
-                PerformedBy = CurrentUsername
-            };
-            _context.StockMovements.Add(movement);
+                // 4. Update or Create the Inventory Balance
+                var balance = _context.InventoryBalances
+                    .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
 
-            // 6. Commit both changes to SQL Server simultaneously
-            _context.SaveChanges();
+                if (balance != null)
+                {
+                    // If the item is already in this bin, just add to the existing quantity
+                    balance.Quantity += request.Quantity;
+                }
+                else
+                {
+                    // If this is the first time this item is placed in this bin, create a new record
+                    balance = new InventoryBalance
+                    {
+                        ItemId = request.ItemId,
+                        WarehouseBinId = request.WarehouseBinId,
+                        Quantity = request.Quantity
+                    };
+                    _context.InventoryBalances.Add(balance);
+                }
+
+                // 5. Log the Stock Movement for auditing
+                var movement = new StockMovement
+                {
+                    ItemId = request.ItemId,
+                    WarehouseBinId = request.WarehouseBinId,
+                    TransactionType = "RECEIVE",
+                    QuantityChanged = request.Quantity,
+                    Timestamp = DateTime.UtcNow,
+                    PerformedBy = CurrentUsername
+                };
+                _context.StockMovements.Add(movement);
+
+                // 6. Commit both changes to SQL Server simultaneously
+                _context.SaveChanges();
+                newTotalBalance = balance.Quantity;
+            }
 
             return Ok(new {
                 Message = $"Successfully received {request.Quantity} units of {item.Name} into {bin.Zone}-{bin.Aisle}-{bin.Shelf}.",
-                NewTotalBalance = balance.Quantity
+                NewTotalBalance = newTotalBalance
             });
         });
     }
@@ -415,8 +476,58 @@ public class InventoryController : ControllerBase
             return BadRequest(new { Message = "Quantity must be greater than zero." });
         }
 
+        var item = _context.Items.Find(request.ItemId);
+        if (item == null)
+        {
+            return NotFound(new { Message = $"Item with ID {request.ItemId} not found." });
+        }
+
+        // A lot-tracked item's stock is only ever addressable by lot - "pick
+        // 8 of this item from this bin" is not a complete instruction once
+        // the bin can hold more than one batch of it.
+        var lotNumber = NormalizeLotNumber(request.LotNumber);
+        if (item.TracksLots && lotNumber == null)
+        {
+            return BadRequest(new { Message = $"'{item.Name}' tracks lots. Choose the lot/batch number to pick from." });
+        }
+
         return ExecuteStockMove(() =>
         {
+            if (item.TracksLots)
+            {
+                var lot = _context.Lots.FirstOrDefault(l => l.ItemId == request.ItemId && l.LotNumber == lotNumber);
+                var lotBalance = lot == null
+                    ? null
+                    : _context.InventoryLotBalances.FirstOrDefault(b =>
+                        b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId && b.LotId == lot.Id);
+
+                if (lotBalance == null || lotBalance.Quantity < request.Quantity)
+                {
+                    return BadRequest(new { Message = $"Insufficient stock in lot '{lotNumber}' in the specified bin to fulfill this pick." });
+                }
+
+                lotBalance.Quantity -= request.Quantity;
+
+                _context.StockMovements.Add(new StockMovement
+                {
+                    ItemId = request.ItemId,
+                    WarehouseBinId = request.WarehouseBinId,
+                    TransactionType = "PICK",
+                    QuantityChanged = -request.Quantity,
+                    Timestamp = DateTime.UtcNow,
+                    PerformedBy = CurrentUsername,
+                    LotId = lot!.Id
+                });
+
+                _context.SaveChanges();
+
+                return Ok(new {
+                    Message = $"Successfully picked {request.Quantity} units of lot '{lotNumber}' from Bin {request.WarehouseBinId}.",
+                    RemainingBalance = lotBalance.Quantity,
+                    LowStockWarning = LowStockNoticeFor(request.ItemId)
+                });
+            }
+
             // Check if the inventory balance record exists for this item in this specific bin
             var balance = _context.InventoryBalances
                 .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
@@ -468,8 +579,94 @@ public class InventoryController : ControllerBase
             return BadRequest(new { Message = "Source and destination bins cannot be the same." });
         }
 
+        var item = _context.Items.Find(request.ItemId);
+        if (item == null)
+        {
+            return NotFound(new { Message = $"Item with ID {request.ItemId} not found." });
+        }
+
+        // A relocation of a lot-tracked item is still a move of one specific
+        // batch - the shelf it lands on has to know which lot arrived, the
+        // same as a receive does.
+        var lotNumber = NormalizeLotNumber(request.LotNumber);
+        if (item.TracksLots && lotNumber == null)
+        {
+            return BadRequest(new { Message = $"'{item.Name}' tracks lots. Choose the lot/batch number to relocate." });
+        }
+
         return ExecuteStockMove(() =>
         {
+            var timestamp = DateTime.UtcNow;
+
+            if (item.TracksLots)
+            {
+                var lot = _context.Lots.FirstOrDefault(l => l.ItemId == request.ItemId && l.LotNumber == lotNumber);
+                var sourceLotBalance = lot == null
+                    ? null
+                    : _context.InventoryLotBalances.FirstOrDefault(b =>
+                        b.ItemId == request.ItemId && b.WarehouseBinId == request.SourceBinId && b.LotId == lot.Id);
+
+                if (sourceLotBalance == null || sourceLotBalance.Quantity < request.Quantity)
+                {
+                    return BadRequest(new { Message = $"Insufficient stock in lot '{lotNumber}' in source bin for relocation." });
+                }
+
+                var destinationLotBinExists = _context.WarehouseBins.Any(b => b.Id == request.DestinationBinId);
+                if (!destinationLotBinExists)
+                {
+                    return NotFound(new { Message = $"Destination Bin with ID {request.DestinationBinId} does not exist." });
+                }
+
+                sourceLotBalance.Quantity -= request.Quantity;
+
+                var destLotBalance = _context.InventoryLotBalances.FirstOrDefault(b =>
+                    b.ItemId == request.ItemId && b.WarehouseBinId == request.DestinationBinId && b.LotId == lot!.Id);
+
+                if (destLotBalance != null)
+                {
+                    destLotBalance.Quantity += request.Quantity;
+                }
+                else
+                {
+                    destLotBalance = new InventoryLotBalance
+                    {
+                        ItemId = request.ItemId,
+                        WarehouseBinId = request.DestinationBinId,
+                        Quantity = request.Quantity,
+                        LotId = lot!.Id
+                    };
+                    _context.InventoryLotBalances.Add(destLotBalance);
+                }
+
+                _context.StockMovements.Add(new StockMovement
+                {
+                    ItemId = request.ItemId,
+                    WarehouseBinId = request.SourceBinId,
+                    TransactionType = "RELOCATE",
+                    QuantityChanged = -request.Quantity,
+                    Timestamp = timestamp,
+                    PerformedBy = CurrentUsername,
+                    LotId = lot!.Id
+                });
+
+                _context.StockMovements.Add(new StockMovement
+                {
+                    ItemId = request.ItemId,
+                    WarehouseBinId = request.DestinationBinId,
+                    TransactionType = "RELOCATE",
+                    QuantityChanged = request.Quantity,
+                    Timestamp = timestamp,
+                    PerformedBy = CurrentUsername,
+                    LotId = lot!.Id
+                });
+
+                _context.SaveChanges();
+
+                return Ok(new {
+                    Message = $"Successfully relocated {request.Quantity} units of lot '{lotNumber}' from Bin {request.SourceBinId} to Bin {request.DestinationBinId}."
+                });
+            }
+
             // Verify source bin has enough stock
             var sourceBalance = _context.InventoryBalances
                 .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.SourceBinId);
@@ -517,8 +714,6 @@ public class InventoryController : ControllerBase
             // honest for anything that adds up movements without knowing what a
             // relocation is. Both legs share a timestamp, which is what marks
             // them as the two halves of one move.
-            var timestamp = DateTime.UtcNow;
-
             _context.StockMovements.Add(new StockMovement
             {
                 ItemId = request.ItemId,
@@ -614,6 +809,11 @@ public class ItemRequest
     // gets archived and unarchived: through the same edit form as everything
     // else, rather than a separate endpoint for one boolean.
     public bool IsArchived { get; set; }
+
+    // Opts the item into the lot-tracking path - see Item.TracksLots. False
+    // by default for the same reason IsArchived is: a client that has never
+    // heard of this field keeps creating and editing items exactly as before.
+    public bool TracksLots { get; set; }
 }
 
 // None of these carry a PerformedBy: attribution comes from the caller's token,
@@ -634,6 +834,18 @@ public class ReceiveStockRequest
 
     [Range(1, int.MaxValue, ErrorMessage = "Quantity must be a whole number greater than zero.")]
     public int Quantity { get; set; }
+
+    // Required only when the item tracks lots - see
+    // InventoryController.ReceiveStock. Ignored otherwise, the same way an
+    // older client that has never heard of lots keeps working: it simply
+    // never sends this field.
+    [StringLength(64, ErrorMessage = "Lot/batch number cannot be longer than 64 characters.")]
+    public string? LotNumber { get; set; }
+
+    // Only read the first time a given (item, lot number) pair is received -
+    // see FindOrOpenLot. A later receive of the same lot does not get to
+    // change when it expires.
+    public DateTime? ExpirationDate { get; set; }
 }
 
 public class PickStockRequest
@@ -646,6 +858,11 @@ public class PickStockRequest
 
     [Range(1, int.MaxValue, ErrorMessage = "Quantity must be a whole number greater than zero.")]
     public int Quantity { get; set; }
+
+    // Required only when the item tracks lots, to say which batch to pick
+    // from - see InventoryController.PickStock.
+    [StringLength(64, ErrorMessage = "Lot/batch number cannot be longer than 64 characters.")]
+    public string? LotNumber { get; set; }
 }
 
 public class RelocateStockRequest
@@ -661,4 +878,9 @@ public class RelocateStockRequest
 
     [Range(1, int.MaxValue, ErrorMessage = "Quantity must be a whole number greater than zero.")]
     public int Quantity { get; set; }
+
+    // Required only when the item tracks lots, to say which batch is moving -
+    // see InventoryController.RelocateStock.
+    [StringLength(64, ErrorMessage = "Lot/batch number cannot be longer than 64 characters.")]
+    public string? LotNumber { get; set; }
 }
