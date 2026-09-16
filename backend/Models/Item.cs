@@ -73,4 +73,14 @@ public class Item
     // anything it already recorded. Defaults false so every item that existed
     // before this column did stays visible exactly as before.
     public bool IsArchived { get; set; }
+
+    // Whether this item's stock is tracked per lot/batch rather than as one
+    // number per bin. False is the default and the safe state - every item
+    // that existed before this column did keeps using InventoryBalance
+    // exactly as before, with no lot to name on a receive or a pick. An item
+    // only enters the lot-tracking path once someone opts it in, because most
+    // items never need it and the extra step (naming a lot on every receive)
+    // is a cost only lot-tracked items should pay. See InventoryLotBalance
+    // for what changes once this is true.
+    public bool TracksLots { get; set; }
 }

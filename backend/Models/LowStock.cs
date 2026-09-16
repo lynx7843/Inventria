@@ -86,9 +86,16 @@ public static class LowStock
                 item.Category,
                 item.ReorderPoint,
                 item.ReorderQuantity,
-                QuantityOnHand = context.InventoryBalances
-                    .Where(balance => balance.ItemId == item.Id)
-                    .Sum(balance => (int?)balance.Quantity) ?? 0
+                // Same two-table sum as InventoryController.GetAllItems - a
+                // lot-tracked item's stock lives in InventoryLotBalance
+                // instead of here, and this is the one definition of "low on
+                // stock", so it has to see both.
+                QuantityOnHand = (context.InventoryBalances
+                        .Where(balance => balance.ItemId == item.Id)
+                        .Sum(balance => (int?)balance.Quantity) ?? 0)
+                    + (context.InventoryLotBalances
+                        .Where(balance => balance.ItemId == item.Id)
+                        .Sum(balance => (int?)balance.Quantity) ?? 0)
             })
             .Where(item => item.QuantityOnHand <= item.ReorderPoint);
 

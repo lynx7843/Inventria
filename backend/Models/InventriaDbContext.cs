@@ -14,6 +14,8 @@ public class InventriaDbContext : DbContext
     public DbSet<InventoryBalance> InventoryBalances { get; set; }
     public DbSet<StockMovement> StockMovements { get; set; }
     public DbSet<Supplier> Suppliers { get; set; }
+    public DbSet<Lot> Lots { get; set; }
+    public DbSet<InventoryLotBalance> InventoryLotBalances { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -88,6 +90,56 @@ public class InventriaDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(m => m.WarehouseBinId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Same reasoning as the bin above: a movement that named a lot
+            // said something happened to that batch, and a deleted lot would
+            // leave the audit log pointing at a recall that no longer
+            // resolves to anything. Nullable for the same reason the bin is -
+            // only movements against a lot-tracked item ever set it.
+            movement.HasOne(m => m.Lot)
+                .WithMany()
+                .HasForeignKey(m => m.LotId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // A lot is scoped to one item - "LOT-2026-01" from one supplier means
+        // nothing to another item that happens to reuse the string - so the
+        // uniqueness that matters is the pair, not the number alone.
+        modelBuilder.Entity<Lot>(lot =>
+        {
+            lot.Property(l => l.LotNumber).HasMaxLength(64);
+            lot.HasIndex(l => new { l.ItemId, l.LotNumber }).IsUnique();
+
+            // Same story as InventoryBalance's Item relationship: a lot is a
+            // record of a batch that existed, and deleting the item it
+            // belonged to does not un-receive that batch.
+            lot.HasOne(l => l.Item)
+                .WithMany()
+                .HasForeignKey(l => l.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<InventoryLotBalance>(balance =>
+        {
+            // The three-way equivalent of InventoryBalance's unique index,
+            // for the same reason: two concurrent first-receipts of one
+            // lot into one bin must not be able to both insert.
+            balance.HasIndex(b => new { b.ItemId, b.WarehouseBinId, b.LotId }).IsUnique();
+
+            balance.HasOne(b => b.Item)
+                .WithMany()
+                .HasForeignKey(b => b.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            balance.HasOne(b => b.WarehouseBin)
+                .WithMany()
+                .HasForeignKey(b => b.WarehouseBinId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            balance.HasOne(b => b.Lot)
+                .WithMany()
+                .HasForeignKey(b => b.LotId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Usernames identify an account to log in as, so two of them is an
@@ -157,6 +209,11 @@ public class InventriaDbContext : DbContext
             // out here to keep the model and the `has-pending-model-changes`
             // check agreeing with it.
             item.Property(i => i.IsArchived).HasDefaultValue(false);
+
+            // Same reasoning again: every item that existed before this
+            // column did was tracked the only way the system knew how, which
+            // is what false means here.
+            item.Property(i => i.TracksLots).HasDefaultValue(false);
         });
 
         // Contact fields are free text with no uniqueness or length concern
