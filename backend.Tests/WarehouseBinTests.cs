@@ -19,6 +19,7 @@ public class WarehouseBinTests
     public void Creating_a_bin_trims_its_address()
     {
         using var db = new TestDatabase();
+        db.AddWarehouse();
 
         var result = ControllerFor(db).CreateBin(new WarehouseBinRequest
         {
@@ -128,6 +129,83 @@ public class WarehouseBinTests
         using var db = new TestDatabase();
 
         var result = ControllerFor(db).DeleteBin(999);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    // --- WAREHOUSES --------------------------------------------------------
+
+    [Fact]
+    public void Creating_a_bin_with_no_warehouse_named_lands_in_the_default_one()
+    {
+        using var db = new TestDatabase();
+        var warehouse = db.AddWarehouse();
+
+        var result = ControllerFor(db).CreateBin(new WarehouseBinRequest
+        {
+            Zone = "Electronics",
+            Aisle = "A1",
+            Shelf = "S1"
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+
+        using var check = db.NewContext();
+        Assert.Equal(warehouse.Id, check.WarehouseBins.Single().WarehouseId);
+    }
+
+    [Fact]
+    public void Creating_a_bin_in_a_warehouse_that_does_not_exist_is_a_not_found()
+    {
+        using var db = new TestDatabase();
+
+        var result = ControllerFor(db).CreateBin(new WarehouseBinRequest
+        {
+            WarehouseId = 999,
+            Zone = "Electronics",
+            Aisle = "A1",
+            Shelf = "S1"
+        });
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public void The_same_address_is_allowed_in_two_different_warehouses()
+    {
+        using var db = new TestDatabase();
+        var warehouseA = db.AddWarehouse("Warehouse A");
+        var warehouseB = db.AddWarehouse("Warehouse B");
+        var controller = ControllerFor(db);
+
+        controller.CreateBin(new WarehouseBinRequest { WarehouseId = warehouseA.Id, Zone = "Electronics", Aisle = "A1", Shelf = "S1" });
+        var result = controller.CreateBin(new WarehouseBinRequest { WarehouseId = warehouseB.Id, Zone = "Electronics", Aisle = "A1", Shelf = "S1" });
+
+        Assert.IsType<OkObjectResult>(result);
+
+        using var check = db.NewContext();
+        Assert.Equal(2, check.WarehouseBins.Count());
+    }
+
+    // A controller-level duplicate-address test belongs at the SQL Server test
+    // pass, not here - see TestDatabase's note on why SQLite's unique-violation
+    // exception is not one UniqueConstraint.WasViolated recognises.
+    // SchemaConstraintTests covers the same-warehouse collision at the schema
+    // level instead.
+
+    [Fact]
+    public void Moving_a_bin_to_a_warehouse_that_does_not_exist_is_a_not_found()
+    {
+        using var db = new TestDatabase();
+        var bin = db.AddBin();
+
+        var result = ControllerFor(db).UpdateBin(bin.Id, new WarehouseBinRequest
+        {
+            WarehouseId = 999,
+            Zone = bin.Zone,
+            Aisle = bin.Aisle,
+            Shelf = bin.Shelf
+        });
 
         Assert.IsType<NotFoundObjectResult>(result);
     }

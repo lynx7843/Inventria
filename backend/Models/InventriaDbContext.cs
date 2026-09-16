@@ -16,6 +16,7 @@ public class InventriaDbContext : DbContext
     public DbSet<Supplier> Suppliers { get; set; }
     public DbSet<Lot> Lots { get; set; }
     public DbSet<InventoryLotBalance> InventoryLotBalances { get; set; }
+    public DbSet<Warehouse> Warehouses { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -231,7 +232,22 @@ public class InventriaDbContext : DbContext
             bin.Property(b => b.Zone).HasMaxLength(64);
             bin.Property(b => b.Aisle).HasMaxLength(32);
             bin.Property(b => b.Shelf).HasMaxLength(32);
-            bin.HasIndex(b => new { b.Zone, b.Aisle, b.Shelf }).IsUnique();
+
+            // Scoped to the warehouse now, not global: two different
+            // buildings can each have an A1/S1, and that used to be
+            // impossible to express because there was only ever one
+            // building. See the AddWarehouse migration for how every bin
+            // that predates WarehouseId keeps its address unique by landing
+            // in the same single default warehouse.
+            bin.HasIndex(b => new { b.WarehouseId, b.Zone, b.Aisle, b.Shelf }).IsUnique();
+
+            // Same reasoning as Item's Supplier relationship: retiring a
+            // warehouse is a fact about the warehouse, not permission to
+            // erase the bins that were addresses within it.
+            bin.HasOne(b => b.Warehouse)
+                .WithMany()
+                .HasForeignKey(b => b.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

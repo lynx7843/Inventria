@@ -24,10 +24,12 @@ public class WarehouseBinsController : ControllerBase
     [HttpGet]
     public IActionResult GetBins()
     {
-        // Ordered by address so the pickers that render this read like a walk
-        // through the warehouse rather than like insert order.
+        // Ordered by warehouse first, then by address within it, so the
+        // pickers that render this read like a walk through one building at
+        // a time rather than like insert order.
         var bins = _context.WarehouseBins
-            .OrderBy(b => b.Zone)
+            .OrderBy(b => b.WarehouseId)
+            .ThenBy(b => b.Zone)
             .ThenBy(b => b.Aisle)
             .ThenBy(b => b.Shelf)
             .ToList();
@@ -38,10 +40,14 @@ public class WarehouseBinsController : ControllerBase
     [HttpPost]
     public IActionResult CreateBin([FromBody] WarehouseBinRequest request)
     {
+        var (warehouseId, error) = ResolveWarehouseId(request.WarehouseId);
+        if (error != null) return error;
+
         // Surrounding spaces are invisible in the UI but not to the unique
         // index, so "A1 " would be accepted as a second, indistinguishable A1.
         var bin = new WarehouseBin
         {
+            WarehouseId = warehouseId,
             Zone = request.Zone.Trim(),
             Aisle = request.Aisle.Trim(),
             Shelf = request.Shelf.Trim()
@@ -55,7 +61,7 @@ public class WarehouseBinsController : ControllerBase
         }
         catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
         {
-            return BadRequest(new { Message = $"Bin {Describe(bin)} already exists." });
+            return BadRequest(new { Message = $"Bin {Describe(bin)} already exists in that warehouse." });
         }
 
         return Ok(new { Message = "Bin created successfully.", Bin = bin });
@@ -67,6 +73,10 @@ public class WarehouseBinsController : ControllerBase
         var bin = _context.WarehouseBins.Find(id);
         if (bin == null) return NotFound(new { Message = "Bin not found." });
 
+        var (warehouseId, error) = ResolveWarehouseId(request.WarehouseId);
+        if (error != null) return error;
+
+        bin.WarehouseId = warehouseId;
         bin.Zone = request.Zone.Trim();
         bin.Aisle = request.Aisle.Trim();
         bin.Shelf = request.Shelf.Trim();
@@ -77,7 +87,7 @@ public class WarehouseBinsController : ControllerBase
         }
         catch (DbUpdateException ex) when (UniqueConstraint.WasViolated(ex))
         {
-            return BadRequest(new { Message = $"Bin {Describe(bin)} already exists." });
+            return BadRequest(new { Message = $"Bin {Describe(bin)} already exists in that warehouse." });
         }
 
         return Ok(new { Message = "Bin updated successfully." });
@@ -135,12 +145,45 @@ public class WarehouseBinsController : ControllerBase
 
     // The address as people say it, and as the stock movement messages print it.
     private static string Describe(WarehouseBin bin) => $"{bin.Zone}-{bin.Aisle}-{bin.Shelf}";
+
+    // Zero means the caller did not name a warehouse - an older client, or
+    // one that has never needed to think about more than one building - so
+    // it resolves to whichever warehouse was created first, which for every
+    // installation that has not deliberately added a second site is the one
+    // "Main Warehouse" the AddWarehouse migration seeded. A non-zero id is
+    // checked against the table rather than trusted, the same way every
+    // other foreign key on this controller's requests is.
+    private (int WarehouseId, IActionResult? Error) ResolveWarehouseId(int requestedWarehouseId)
+    {
+        if (requestedWarehouseId == 0)
+        {
+            var defaultWarehouseId = _context.Warehouses.OrderBy(w => w.Id).Select(w => w.Id).FirstOrDefault();
+            return defaultWarehouseId == 0
+                ? (0, NotFound(new { Message = "No warehouse exists yet." }))
+                : (defaultWarehouseId, null);
+        }
+
+        if (!_context.Warehouses.Any(w => w.Id == requestedWarehouseId))
+        {
+            return (0, NotFound(new { Message = $"Warehouse with ID {requestedWarehouseId} not found." }));
+        }
+
+        return (requestedWarehouseId, null);
+    }
 }
 
 public class WarehouseBinRequest
 {
+    // Zero, the default, means "not specified" rather than an error - see
+    // WarehouseBinsController.ResolveWarehouseId. A single-site install only
+    // ever has the one warehouse the AddWarehouse migration seeded, and a
+    // client that has never heard of warehouses (which is every client
+    // today - see AddWarehouse) should keep creating bins exactly as before
+    // rather than being made to look one up and send its id first.
+    public int WarehouseId { get; set; }
+
     // The lengths are the widths of the columns, and the columns are bounded
-    // because the unique index over all three needs them to be. Without the
+    // because the unique index over all four needs them to be. Without the
     // limits an over-long value is a truncation error from SQL Server, which
     // reaches the caller as a 500 rather than as "that is too long".
     [NotBlank(ErrorMessage = "Zone is required.")]

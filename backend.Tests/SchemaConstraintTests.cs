@@ -125,6 +125,20 @@ public class SchemaConstraintTests
     }
 
     [Fact]
+    public void Deleting_a_warehouse_that_still_has_bins_is_refused_by_the_database()
+    {
+        using var db = new TestDatabase();
+        var bin = db.AddBin();
+
+        using var deleting = db.NewContext();
+        deleting.Warehouses.Remove(deleting.Warehouses.Find(bin.WarehouseId)!);
+
+        // Restrict, not cascade - retiring a building is not permission to
+        // erase the bins that were addresses within it.
+        Assert.Throws<DbUpdateException>(() => deleting.SaveChanges());
+    }
+
+    [Fact]
     public void Two_items_cannot_share_a_sku()
     {
         using var db = new TestDatabase();
@@ -136,14 +150,45 @@ public class SchemaConstraintTests
     }
 
     [Fact]
-    public void Two_bins_cannot_share_an_address()
+    public void Two_bins_in_the_same_warehouse_cannot_share_an_address()
     {
         using var db = new TestDatabase();
-        db.AddBin("Electronics", "A1", "S1");
+        var bin = db.AddBin("Electronics", "A1", "S1");
 
-        // Two rows with the same address are two ids for one physical shelf, and
-        // stock received into one is invisible to anyone looking at the other.
-        db.Context.WarehouseBins.Add(new WarehouseBin { Zone = "Electronics", Aisle = "A1", Shelf = "S1" });
+        // Two rows with the same address in the same building are two ids for
+        // one physical shelf, and stock received into one is invisible to
+        // anyone looking at the other.
+        db.Context.WarehouseBins.Add(new WarehouseBin { WarehouseId = bin.WarehouseId, Zone = "Electronics", Aisle = "A1", Shelf = "S1" });
+
+        Assert.Throws<DbUpdateException>(() => db.Context.SaveChanges());
+    }
+
+    [Fact]
+    public void Two_different_warehouses_can_each_have_the_same_address()
+    {
+        using var db = new TestDatabase();
+        var firstWarehouse = db.AddWarehouse("Warehouse North");
+        var secondWarehouse = db.AddWarehouse("Warehouse South");
+
+        db.AddBin("Electronics", "A1", "S1", warehouseId: firstWarehouse.Id);
+
+        // A1/S1 in one building and A1/S1 in another are not the same shelf -
+        // the index that used to make this a collision was only ever right
+        // because there used to be exactly one building.
+        db.Context.WarehouseBins.Add(new WarehouseBin { WarehouseId = secondWarehouse.Id, Zone = "Electronics", Aisle = "A1", Shelf = "S1" });
+
+        db.Context.SaveChanges();
+
+        using var check = db.NewContext();
+        Assert.Equal(2, check.WarehouseBins.Count());
+    }
+
+    [Fact]
+    public void A_bin_cannot_name_a_warehouse_that_does_not_exist()
+    {
+        using var db = new TestDatabase();
+
+        db.Context.WarehouseBins.Add(new WarehouseBin { WarehouseId = 999, Zone = "Electronics", Aisle = "A1", Shelf = "S1" });
 
         Assert.Throws<DbUpdateException>(() => db.Context.SaveChanges());
     }

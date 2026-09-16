@@ -105,9 +105,26 @@ public sealed class TestDatabase : IDisposable
         return user;
     }
 
-    public WarehouseBin AddBin(string zone = "Electronics", string aisle = "A1", string shelf = "S1")
+    private int? _defaultWarehouseId;
+
+    /// <summary>
+    /// A building for bins to belong to. Lazily created and reused so every
+    /// existing call to AddBin - which predates warehouses entirely - keeps
+    /// landing every bin in the one building it always implicitly meant,
+    /// without every one of those call sites having to know that.
+    /// </summary>
+    public Warehouse AddWarehouse(string name = "Main Warehouse")
     {
-        var bin = new WarehouseBin { Zone = zone, Aisle = aisle, Shelf = shelf };
+        var warehouse = new Warehouse { Name = name };
+        Context.Warehouses.Add(warehouse);
+        Context.SaveChanges();
+        return warehouse;
+    }
+
+    public WarehouseBin AddBin(string zone = "Electronics", string aisle = "A1", string shelf = "S1", int? warehouseId = null)
+    {
+        var resolvedWarehouseId = warehouseId ?? (_defaultWarehouseId ??= AddWarehouse().Id);
+        var bin = new WarehouseBin { WarehouseId = resolvedWarehouseId, Zone = zone, Aisle = aisle, Shelf = shelf };
         Context.WarehouseBins.Add(bin);
         Context.SaveChanges();
         return bin;
