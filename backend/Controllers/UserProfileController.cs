@@ -18,10 +18,12 @@ namespace Inventria.Controllers;
 public class UserProfileController : ControllerBase
 {
     private readonly InventriaDbContext _context;
+    private readonly IWebHostEnvironment _environment;
 
-    public UserProfileController(InventriaDbContext context)
+    public UserProfileController(InventriaDbContext context, IWebHostEnvironment environment)
     {
         _context = context;
+        _environment = environment;
     }
 
     // What the Settings page loads on mount. Login has never returned anything
@@ -41,7 +43,8 @@ public class UserProfileController : ControllerBase
             Username = user.Username,
             Email = user.Email,
             NotifyLowStock = user.NotifyLowStock,
-            NotifyDailySummary = user.NotifyDailySummary
+            NotifyDailySummary = user.NotifyDailySummary,
+            AvatarUrl = AvatarStorage.UrlFor(user.AvatarPath)
         });
     }
 
@@ -85,8 +88,69 @@ public class UserProfileController : ControllerBase
             Username = user.Username,
             Email = user.Email,
             NotifyLowStock = user.NotifyLowStock,
-            NotifyDailySummary = user.NotifyDailySummary
+            NotifyDailySummary = user.NotifyDailySummary,
+            AvatarUrl = AvatarStorage.UrlFor(user.AvatarPath)
         });
+    }
+
+    // Replaces the account's photo. A GUID filename and a signature sniffed from
+    // the bytes themselves - see AvatarStorage - so nothing here ever trusts the
+    // upload's claimed name or Content-Type.
+    [HttpPost("avatar")]
+    [RequestSizeLimit(AvatarStorage.MaxBytes + 64 * 1024)]
+    public async Task<IActionResult> UploadAvatar(IFormFile? file)
+    {
+        var id = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var user = _context.Users.Find(id);
+        if (user == null) return NotFound(new { Message = "User not found." });
+
+        if (file is null)
+        {
+            return BadRequest(new { Message = "Choose an image to upload." });
+        }
+
+        var (relativePath, error) = await AvatarStorage.SaveAsync(file, _environment, HttpContext.RequestAborted);
+        if (error is not null)
+        {
+            return BadRequest(new { Message = error });
+        }
+
+        var previousPath = user.AvatarPath;
+        user.AvatarPath = relativePath;
+
+        try
+        {
+            _context.SaveChanges();
+        }
+        catch
+        {
+            // The row was never updated to point at this file, so nothing else
+            // will ever reference or clean it up - remove it now rather than
+            // leave it behind as dead weight on disk.
+            AvatarStorage.Delete(relativePath, _environment);
+            throw;
+        }
+
+        // Only once the new path is durably saved: deleting the old file first
+        // would leave the row pointing at nothing if SaveChanges then failed.
+        AvatarStorage.Delete(previousPath, _environment);
+
+        return Ok(new { Message = "Photo updated successfully.", AvatarUrl = AvatarStorage.UrlFor(user.AvatarPath) });
+    }
+
+    [HttpDelete("avatar")]
+    public IActionResult DeleteAvatar()
+    {
+        var id = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var user = _context.Users.Find(id);
+        if (user == null) return NotFound(new { Message = "User not found." });
+
+        var previousPath = user.AvatarPath;
+        user.AvatarPath = null;
+        _context.SaveChanges();
+        AvatarStorage.Delete(previousPath, _environment);
+
+        return Ok(new { Message = "Photo removed.", AvatarUrl = (string?)null });
     }
 
     // Until now the only way to change a password was an Admin overwriting it

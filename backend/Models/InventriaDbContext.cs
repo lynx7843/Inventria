@@ -164,6 +164,11 @@ public class InventriaDbContext : DbContext
             // with it.
             user.Property(u => u.NotifyLowStock).HasDefaultValue(true);
             user.Property(u => u.NotifyDailySummary).HasDefaultValue(false);
+
+            // Long enough for "uploads/avatars/" plus a GUID32 filename and
+            // extension with room to spare - not a guess at a storage limit,
+            // since AvatarStorage is the only thing that ever writes this column.
+            user.Property(u => u.AvatarPath).HasMaxLength(255);
         });
 
         // A SKU is the code people scan and search by, so duplicates make the

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -232,6 +233,19 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }
+
+// Serves the photos AvatarStorage writes, at the same root-relative path it
+// hands back as AvatarUrl. Not the default app.UseStaticFiles(): that overload
+// serves from IWebHostEnvironment.WebRootFileProvider, which the host fixes to
+// a NullFileProvider at startup if wwwroot did not exist at that moment - true
+// of a fresh checkout, which has no wwwroot until the first photo is uploaded.
+// Building the provider here, after creating the directory, means static files
+// work on a first run without requiring a restart.
+Directory.CreateDirectory(AvatarStorage.DirectoryOn(app.Environment));
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(AvatarStorage.WebRootOf(app.Environment))
+});
 
 app.UseCors("AllowSvelteFrontend");
 

@@ -14,4 +14,8 @@ public class User
     // be a surprise, not a preference.
     public bool NotifyLowStock { get; set; } = true;
     public bool NotifyDailySummary { get; set; } = false;
+
+    // Relative to wwwroot, e.g. "uploads/avatars/3f2b....jpg" - never a
+    // client-supplied filename or an absolute path. See AvatarStorage.
+    public string? AvatarPath { get; set; }
 }
