@@ -417,6 +417,29 @@ public class PurchaseOrderTests
         Assert.Equal(10, check.PurchaseOrderLines.Single().QuantityOrdered);
     }
 
+    // --- THE LEDGER --------------------------------------------------------
+
+    [Fact]
+    public void Timestamps_come_back_as_UTC_so_they_serialize_with_a_Z()
+    {
+        using var db = new TestDatabase();
+        var supplier = db.AddSupplier();
+        var item = db.AddItem();
+        var controller = ControllerFor(db);
+
+        controller.CreateOrder(OneLineRequest(supplier.Id, item.Id));
+
+        // Same bug StockMovementTests guards against for the audit log -
+        // datetime2 forgets Kind on the way back from SQL Server, and without
+        // InventriaDbContext's conversion a CreatedAt logged at 09:42 UTC reads
+        // as 09:42 wherever the viewer's browser happens to be.
+        using var check = db.NewContext();
+        var createdAt = check.PurchaseOrders.Single().CreatedAt;
+
+        Assert.Equal(DateTimeKind.Utc, createdAt.Kind);
+        Assert.EndsWith("Z", System.Text.Json.JsonSerializer.Serialize(createdAt).Trim('"'));
+    }
+
     // --- LISTING -------------------------------------------------------------
 
     [Fact]

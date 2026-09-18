@@ -75,10 +75,7 @@ public class InventriaDbContext : DbContext
             // surfaced next. The write side only has to correct a Local time;
             // Unspecified is assumed to already be UTC, because everything that
             // writes this column writes UtcNow.
-            movement.Property(m => m.Timestamp)
-                .HasConversion(
-                    write => write.Kind == DateTimeKind.Local ? write.ToUniversalTime() : write,
-                    read => DateTime.SpecifyKind(read, DateTimeKind.Utc));
+            movement.Property(m => m.Timestamp).HasConversion(v => ToUtcForWrite(v), v => AsUtcOnRead(v));
 
             movement.HasOne<Item>()
                 .WithMany()
@@ -263,6 +260,19 @@ public class InventriaDbContext : DbContext
             order.Property(o => o.CreatedBy).HasMaxLength(100);
             order.Property(o => o.Notes).HasMaxLength(1000);
 
+            // Same Kind=Unspecified problem StockMovement.Timestamp already
+            // documents, and the same fix - CreatedAt and OrderedAt are always
+            // DateTime.UtcNow, so Unspecified read back from datetime2 is
+            // assumed to already be UTC. ExpectedDate isn't always UtcNow - it's
+            // whatever a caller sends - but it is still a UTC instant once
+            // stored, so a value read back as Local rather than Unspecified
+            // (possible from a client that never converts) is corrected the
+            // same way on the way in.
+            order.Property(o => o.CreatedAt).HasConversion(v => ToUtcForWrite(v), v => AsUtcOnRead(v));
+            order.Property(o => o.OrderedAt).HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+            order.Property(o => o.ReceivedAt).HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+            order.Property(o => o.ExpectedDate).HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+
             // A supplier retiring does not un-order what was already placed
             // with them - same reasoning as Item.Supplier and WarehouseBin.
             // Warehouse.
@@ -298,4 +308,19 @@ public class InventriaDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
+
+    // Shared by every DateTime column above that is written as UtcNow and has
+    // to come back with Kind=Utc rather than Unspecified - see
+    // StockMovement.Timestamp for why datetime2 loses that fact on its own.
+    private static DateTime ToUtcForWrite(DateTime value) =>
+        value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : value;
+
+    private static DateTime AsUtcOnRead(DateTime value) =>
+        DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+    private static DateTime? ToUtcForWriteNullable(DateTime? value) =>
+        value.HasValue ? ToUtcForWrite(value.Value) : value;
+
+    private static DateTime? AsUtcOnReadNullable(DateTime? value) =>
+        value.HasValue ? AsUtcOnRead(value.Value) : value;
 }

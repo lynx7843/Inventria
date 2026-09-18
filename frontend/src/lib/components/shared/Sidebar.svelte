@@ -57,6 +57,9 @@
 		<a href={dashboardHref} class:active={activePage === 'Dashboard'}>Dashboard</a>
 		<a href={resolve('/inventory')} class:active={activePage === 'Inventory'}>Inventory</a>
 		<a href={resolve('/bins')} class:active={activePage === 'Bins'}>Bins</a>
+		<a href={resolve('/purchase-orders')} class:active={activePage === 'Purchase Orders'}
+			>Purchase Orders</a
+		>
 		<a href={resolve('/reports')} class:active={activePage === 'Reports'}>Reports</a>
 		{#if isAdmin}
 			<a href={resolve('/users')} class:active={activePage === 'Users'}>Users</a>
