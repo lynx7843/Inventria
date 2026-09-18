@@ -142,6 +142,11 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 
+// Shared by InventoryController's POST /receive and PurchaseOrdersController's
+// line-receive endpoint - see StockReceivingService for why the concurrency
+// handling around InventoryBalance.RowVersion has to live in one place.
+builder.Services.AddScoped<StockReceivingService>();
+
 builder.Services.AddControllers();
 
 // [ApiController] rejects a request whose DTO fails validation before the action
