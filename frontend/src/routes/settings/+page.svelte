@@ -3,7 +3,7 @@
 	import Header from '$lib/components/shared/Header.svelte';
 	import { onMount } from 'svelte';
 	import { requireSession, getUsername, getRole, saveSession, endExpiredSession } from '$lib/auth';
-	import { apiFetch, apiErrorMessage } from '$lib/api';
+	import { apiFetch, apiErrorMessage, apiUrl } from '$lib/api';
 
 	// Open to anyone signed in - there's nothing here an Employee shouldn't see
 	// about their own account.
@@ -19,6 +19,17 @@
 	let notifyLowStock = $state(true);
 	let notifyDailySummary = $state(false);
 	let isLoadingProfile = $state(true);
+
+	// Root-relative, e.g. "/uploads/avatars/3f2b....jpg" - apiUrl() turns it
+	// into a full URL against the backend, which is a different origin than
+	// this page. Null shows the initials avatar below instead.
+	let avatarUrl = $state<string | null>(null);
+	let avatarInput = $state<HTMLInputElement | undefined>(undefined);
+	let uploadingAvatar = $state(false);
+	let avatarError = $state('');
+
+	const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+	const AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 	let showSavedFlash = $state(false);
 	let savedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -55,6 +66,7 @@
 			email = data.email;
 			notifyLowStock = data.notifyLowStock;
 			notifyDailySummary = data.notifyDailySummary;
+			avatarUrl = data.avatarUrl ?? null;
 		} catch (err) {
 			console.error(err);
 			errorMsg = 'A network error occurred while loading your account.';
@@ -62,6 +74,87 @@
 			isLoadingProfile = false;
 		}
 	});
+
+	function pickPhoto() {
+		avatarError = '';
+		avatarInput?.click();
+	}
+
+	async function onPhotoChosen(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		// Clearing this lets the same file be re-picked after a rejected upload -
+		// without it, choosing the identical file twice in a row fires no change
+		// event the second time.
+		input.value = '';
+		if (!file) return;
+
+		avatarError = '';
+
+		// The same checks the server makes, run here only to save a round trip
+		// on the common mistake - the server's checks are the ones that actually
+		// decide what gets saved.
+		if (!AVATAR_TYPES.has(file.type)) {
+			avatarError = 'File must be a JPEG, PNG, or WebP image.';
+			return;
+		}
+		if (file.size > AVATAR_MAX_BYTES) {
+			avatarError = 'Image must be 2 MB or smaller.';
+			return;
+		}
+
+		uploadingAvatar = true;
+
+		try {
+			const body = new FormData();
+			body.append('file', file);
+			const res = await apiFetch('/api/users/me/avatar', { method: 'POST', body });
+
+			if (res.status === 401) {
+				endExpiredSession();
+				return;
+			}
+
+			if (!res.ok) {
+				avatarError = await apiErrorMessage(res, 'Failed to upload photo.');
+				return;
+			}
+
+			const data = await res.json();
+			avatarUrl = data.avatarUrl ?? null;
+		} catch (err) {
+			console.error(err);
+			avatarError = 'A network error occurred while uploading.';
+		} finally {
+			uploadingAvatar = false;
+		}
+	}
+
+	async function removePhoto() {
+		avatarError = '';
+		uploadingAvatar = true;
+
+		try {
+			const res = await apiFetch('/api/users/me/avatar', { method: 'DELETE' });
+
+			if (res.status === 401) {
+				endExpiredSession();
+				return;
+			}
+
+			if (!res.ok) {
+				avatarError = await apiErrorMessage(res, 'Failed to remove photo.');
+				return;
+			}
+
+			avatarUrl = null;
+		} catch (err) {
+			console.error(err);
+			avatarError = 'A network error occurred while removing the photo.';
+		} finally {
+			uploadingAvatar = false;
+		}
+	}
 
 	function initials(name: string): string {
 		const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -198,8 +291,45 @@
 				<div class="acct-content">
 					<div class="avatar-col">
 						<div class="avatar-wrap">
-							<span class="avatar-initials">{initials(fullName)}</span>
+							{#if avatarUrl}
+								<img class="avatar-photo" src={apiUrl(avatarUrl)} alt="" />
+							{:else}
+								<span class="avatar-initials">{initials(fullName)}</span>
+							{/if}
 						</div>
+
+						<input
+							bind:this={avatarInput}
+							type="file"
+							accept="image/jpeg,image/png,image/webp"
+							class="avatar-file-input"
+							onchange={onPhotoChosen}
+						/>
+
+						<div class="avatar-actions">
+							<button
+								type="button"
+								class="avatar-link-btn"
+								onclick={pickPhoto}
+								disabled={uploadingAvatar}
+							>
+								{uploadingAvatar ? 'Uploading…' : avatarUrl ? 'Change Photo' : 'Upload Photo'}
+							</button>
+							{#if avatarUrl}
+								<button
+									type="button"
+									class="avatar-link-btn danger"
+									onclick={removePhoto}
+									disabled={uploadingAvatar}
+								>
+									Remove
+								</button>
+							{/if}
+						</div>
+
+						{#if avatarError}
+							<span class="save-error avatar-error">{avatarError}</span>
+						{/if}
 					</div>
 
 					<div class="fields-col">
@@ -506,6 +636,55 @@
 		font-size: 1.75rem;
 		font-weight: 700;
 		color: #0b6b36;
+	}
+	.avatar-photo {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.avatar-file-input {
+		/* Visually hidden but still focusable/clickable via the button above,
+		   rather than display:none which would drop it from the tab order. */
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+	.avatar-actions {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.35rem;
+	}
+	.avatar-link-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: #0b6b36;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.avatar-link-btn:hover {
+		text-decoration: underline;
+	}
+	.avatar-link-btn:disabled {
+		color: #94a3b8;
+		cursor: not-allowed;
+		text-decoration: none;
+	}
+	.avatar-link-btn.danger {
+		color: #b91c1c;
+	}
+	.avatar-error {
+		max-width: 120px;
+		text-align: center;
 	}
 
 	.fields-col {
