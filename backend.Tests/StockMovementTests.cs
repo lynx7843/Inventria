@@ -12,7 +12,7 @@ namespace Inventria.Tests;
 public class StockMovementTests
 {
     private static InventoryController ControllerFor(TestDatabase db, string username = "alice") =>
-        new(db.Context) { ControllerContext = ApiResult.SignedInAs(username) };
+        new(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs(username) };
 
     // --- RECEIVE ---------------------------------------------------------
 

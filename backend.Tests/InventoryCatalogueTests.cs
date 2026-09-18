@@ -11,7 +11,7 @@ namespace Inventria.Tests;
 public class InventoryCatalogueTests
 {
     private static InventoryController ControllerFor(TestDatabase db) =>
-        new(db.Context) { ControllerContext = ApiResult.SignedInAs("alice") };
+        new(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
     private static List<string> NamesIn(IActionResult result) =>
         ApiResult.Property(ApiResult.Body(result), "Items")

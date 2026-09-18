@@ -17,6 +17,8 @@ public class InventriaDbContext : DbContext
     public DbSet<Lot> Lots { get; set; }
     public DbSet<InventoryLotBalance> InventoryLotBalances { get; set; }
     public DbSet<Warehouse> Warehouses { get; set; }
+    public DbSet<PurchaseOrder> PurchaseOrders { get; set; }
+    public DbSet<PurchaseOrderLine> PurchaseOrderLines { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -252,6 +254,47 @@ public class InventriaDbContext : DbContext
             bin.HasOne(b => b.Warehouse)
                 .WithMany()
                 .HasForeignKey(b => b.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PurchaseOrder>(order =>
+        {
+            order.Property(o => o.Status).HasMaxLength(32);
+            order.Property(o => o.CreatedBy).HasMaxLength(100);
+            order.Property(o => o.Notes).HasMaxLength(1000);
+
+            // A supplier retiring does not un-order what was already placed
+            // with them - same reasoning as Item.Supplier and WarehouseBin.
+            // Warehouse.
+            order.HasOne(o => o.Supplier)
+                .WithMany()
+                .HasForeignKey(o => o.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            order.HasMany(o => o.Lines)
+                .WithOne(l => l.PurchaseOrder)
+                .HasForeignKey(l => l.PurchaseOrderId)
+                // Unlike Item/WarehouseBin/Supplier, a line has no meaning
+                // apart from the order it belongs to - it is not a separate
+                // record of anything. PurchaseOrdersController replaces a
+                // Draft's lines by removing the tracked ones and adding new
+                // ones, which EF turns into DELETEs regardless of this
+                // setting; Cascade only matters if an order itself is ever
+                // deleted, so that a Draft nobody placed can go without
+                // orphaning the lines under it first.
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PurchaseOrderLine>(line =>
+        {
+            line.Property(l => l.UnitCost).HasPrecision(18, 2);
+
+            // Same reasoning as InventoryBalance.Item: an item's ordering
+            // history outlives a decision to stop stocking it, so this
+            // refuses the delete rather than following it.
+            line.HasOne(l => l.Item)
+                .WithMany()
+                .HasForeignKey(l => l.ItemId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

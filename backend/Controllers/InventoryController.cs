@@ -13,10 +13,12 @@ namespace Inventria.Controllers;
 public class InventoryController : ControllerBase
 {
     private readonly InventriaDbContext _context;
+    private readonly StockReceivingService _receiving;
 
-    public InventoryController(InventriaDbContext context)
+    public InventoryController(InventriaDbContext context, StockReceivingService receiving)
     {
         _context = context;
+        _receiving = receiving;
     }
 
     private string CurrentUsername => User.FindFirstValue(ClaimTypes.Name)!;
@@ -179,22 +181,6 @@ public class InventoryController : ControllerBase
     // not a lot number that happens to be blank.
     private static string? NormalizeLotNumber(string? lotNumber) =>
         string.IsNullOrWhiteSpace(lotNumber) ? null : lotNumber.Trim();
-
-    // Finds the lot a receive is adding to, or opens a new one for a lot
-    // number this item has not seen before. Only ever called for an item with
-    // TracksLots set, and only from inside a move that will save it - a
-    // freshly created lot has no Id until SaveChanges runs, which is why
-    // everything downstream (the balance row, the movement) hangs it off the
-    // Lot navigation instead of reading LotId up front.
-    private Lot FindOrOpenLot(int itemId, string lotNumber, DateTime? expirationDate)
-    {
-        var lot = _context.Lots.FirstOrDefault(l => l.ItemId == itemId && l.LotNumber == lotNumber);
-        if (lot != null) return lot;
-
-        lot = new Lot { ItemId = itemId, LotNumber = lotNumber, ExpirationDate = expirationDate };
-        _context.Lots.Add(lot);
-        return lot;
-    }
 
     // --- MASTER ITEM CRUD OPERATIONS ---
 
@@ -378,93 +364,21 @@ public class InventoryController : ControllerBase
             return BadRequest(new { Message = $"'{item.Name}' tracks lots. Give the lot/batch number this stock belongs to." });
         }
 
-        return ExecuteStockMove(() =>
+        // The retry loop around InventoryBalance.RowVersion lives in the
+        // service now, shared with PurchaseOrdersController's line-receive
+        // endpoint - see StockReceivingService for why that has to be one
+        // copy, not two.
+        var receipt = _receiving.Receive(item, request.WarehouseBinId, request.Quantity, CurrentUsername, lotNumber, request.ExpirationDate);
+
+        if (receipt == null)
         {
-            int newTotalBalance;
+            return Conflict(new { Message = "This stock is being updated by another request. Please try again." });
+        }
 
-            if (item.TracksLots)
-            {
-                var lot = FindOrOpenLot(request.ItemId, lotNumber!, request.ExpirationDate);
-
-                var lotBalance = lot.Id != 0
-                    ? _context.InventoryLotBalances.FirstOrDefault(b =>
-                        b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId && b.LotId == lot.Id)
-                    : null;
-
-                if (lotBalance != null)
-                {
-                    lotBalance.Quantity += request.Quantity;
-                }
-                else
-                {
-                    lotBalance = new InventoryLotBalance
-                    {
-                        ItemId = request.ItemId,
-                        WarehouseBinId = request.WarehouseBinId,
-                        Quantity = request.Quantity,
-                        Lot = lot
-                    };
-                    _context.InventoryLotBalances.Add(lotBalance);
-                }
-
-                _context.StockMovements.Add(new StockMovement
-                {
-                    ItemId = request.ItemId,
-                    WarehouseBinId = request.WarehouseBinId,
-                    TransactionType = "RECEIVE",
-                    QuantityChanged = request.Quantity,
-                    Timestamp = DateTime.UtcNow,
-                    PerformedBy = CurrentUsername,
-                    Lot = lot
-                });
-
-                _context.SaveChanges();
-                newTotalBalance = lotBalance.Quantity;
-            }
-            else
-            {
-                // 4. Update or Create the Inventory Balance
-                var balance = _context.InventoryBalances
-                    .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
-
-                if (balance != null)
-                {
-                    // If the item is already in this bin, just add to the existing quantity
-                    balance.Quantity += request.Quantity;
-                }
-                else
-                {
-                    // If this is the first time this item is placed in this bin, create a new record
-                    balance = new InventoryBalance
-                    {
-                        ItemId = request.ItemId,
-                        WarehouseBinId = request.WarehouseBinId,
-                        Quantity = request.Quantity
-                    };
-                    _context.InventoryBalances.Add(balance);
-                }
-
-                // 5. Log the Stock Movement for auditing
-                var movement = new StockMovement
-                {
-                    ItemId = request.ItemId,
-                    WarehouseBinId = request.WarehouseBinId,
-                    TransactionType = "RECEIVE",
-                    QuantityChanged = request.Quantity,
-                    Timestamp = DateTime.UtcNow,
-                    PerformedBy = CurrentUsername
-                };
-                _context.StockMovements.Add(movement);
-
-                // 6. Commit both changes to SQL Server simultaneously
-                _context.SaveChanges();
-                newTotalBalance = balance.Quantity;
-            }
-
-            return Ok(new {
-                Message = $"Successfully received {request.Quantity} units of {item.Name} into {bin.Zone}-{bin.Aisle}-{bin.Shelf}.",
-                NewTotalBalance = newTotalBalance
-            });
+        return Ok(new
+        {
+            Message = $"Successfully received {request.Quantity} units of {item.Name} into {bin.Zone}-{bin.Aisle}-{bin.Shelf}.",
+            NewTotalBalance = receipt.NewTotalBalance
         });
     }
 

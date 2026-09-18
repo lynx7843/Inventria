@@ -105,6 +105,15 @@ public sealed class TestDatabase : IDisposable
         return user;
     }
 
+    /// <summary>Who a purchase order is placed with.</summary>
+    public Supplier AddSupplier(string name = "Acme Supply Co")
+    {
+        var supplier = new Supplier { Name = name };
+        Context.Suppliers.Add(supplier);
+        Context.SaveChanges();
+        return supplier;
+    }
+
     private int? _defaultWarehouseId;
 
     /// <summary>
