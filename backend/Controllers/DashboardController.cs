@@ -40,6 +40,10 @@ public class DashboardController : ControllerBase
 
         var monthlyThroughput = await _context.StockMovements
             .Where(m => m.Timestamp >= thirtyDaysAgo)
+            // ADJUST corrects the books to match a physical count - nothing
+            // arrived at the dock or left it, so it is not throughput any more
+            // than a RELOCATE leg is; see the RELOCATE comment just below.
+            .Where(m => m.TransactionType != "ADJUST")
             .Where(m => m.TransactionType != "RELOCATE" || m.QuantityChanged < 0)
             .SumAsync(m => (int?)Math.Abs(m.QuantityChanged)) ?? 0;
 
