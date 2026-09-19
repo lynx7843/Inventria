@@ -25,6 +25,8 @@ public class InventriaDbContext : DbContext
     public DbSet<PickListLine> PickListLines { get; set; }
     public DbSet<Transfer> Transfers { get; set; }
     public DbSet<TransferLine> TransferLines { get; set; }
+    public DbSet<BillOfMaterials> BillsOfMaterials { get; set; }
+    public DbSet<BillOfMaterialLine> BillOfMaterialLines { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -456,6 +458,40 @@ public class InventriaDbContext : DbContext
             line.HasOne(l => l.DestinationBin)
                 .WithMany()
                 .HasForeignKey(l => l.DestinationBinId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BillOfMaterials>(bom =>
+        {
+            // One bill of materials per item - a second one for the same item
+            // would just be a second, competing answer to "what does this
+            // build from".
+            bom.HasIndex(b => b.ItemId).IsUnique();
+
+            bom.HasOne(b => b.Item)
+                .WithMany()
+                .HasForeignKey(b => b.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            bom.HasMany(b => b.Components)
+                .WithOne(c => c.BillOfMaterials)
+                .HasForeignKey(c => c.BillOfMaterialsId)
+                // A component line has no meaning apart from the bill of
+                // materials it belongs to - same reasoning as PurchaseOrder.Lines.
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BillOfMaterialLine>(line =>
+        {
+            // The same component listed twice on one bill of materials is
+            // either a mistake or two different quantities for the same
+            // answer to "how much of this do we need" - either way, not
+            // something to store as two rows.
+            line.HasIndex(l => new { l.BillOfMaterialsId, l.ComponentItemId }).IsUnique();
+
+            line.HasOne(l => l.ComponentItem)
+                .WithMany()
+                .HasForeignKey(l => l.ComponentItemId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

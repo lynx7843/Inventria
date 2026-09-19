@@ -210,6 +210,45 @@ public class DashboardTests
     }
 
     [Fact]
+    public async Task Monthly_throughput_does_not_count_assembly_movements()
+    {
+        using var db = new TestDatabase();
+        var handle = db.AddItem("HANDLE", "Handle");
+        var hammer = db.AddItem("HAMMER", "Hammer");
+        var bin = db.AddBin();
+        var inventory = InventoryFor(db);
+
+        inventory.ReceiveStock(new ReceiveStockRequest { ItemId = handle.Id, WarehouseBinId = bin.Id, Quantity = 50 });
+
+        // Turning components already on the books into a finished item still
+        // on the books - nothing arrived at the dock or left it, so it should
+        // not read as a day's throughput any more than an ADJUST does.
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = handle.Id,
+            WarehouseBinId = bin.Id,
+            TransactionType = "ASSEMBLE",
+            QuantityChanged = -5,
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = "alice"
+        });
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = hammer.Id,
+            WarehouseBinId = bin.Id,
+            TransactionType = "ASSEMBLE",
+            QuantityChanged = 5,
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = "alice"
+        });
+        db.Context.SaveChanges();
+
+        var result = await ControllerFor(db).GetAdminStats();
+
+        Assert.Equal(50, ApiResult.Number(result, "MonthlyThroughput"));
+    }
+
+    [Fact]
     public async Task Movements_older_than_thirty_days_fall_out_of_throughput()
     {
         using var db = new TestDatabase();
