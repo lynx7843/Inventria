@@ -111,8 +111,13 @@ public class InventriaDbContext : DbContext
 
             // Free text, but not unbounded free text - the same reasoning as
             // Item.Category: past this length it has stopped being a reason
-            // code and started being pasted junk.
-            movement.Property(m => m.ReasonCode).HasMaxLength(200);
+            // code and started being pasted junk. 500 rather than 200: a
+            // return's reason is customer-facing prose, not a short count
+            // sheet note, so it needs more room.
+            movement.Property(m => m.ReasonCode).HasMaxLength(500);
+
+            movement.Property(m => m.ConditionGrade).HasMaxLength(32);
+            movement.Property(m => m.Disposition).HasMaxLength(32);
         });
 
         // A lot is scoped to one item - "LOT-2026-01" from one supplier means
