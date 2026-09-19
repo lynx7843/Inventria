@@ -9,7 +9,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
 
@@ -309,6 +308,7 @@ static void SeedFirstAdmin(WebApplication app)
         if (db.Users.Any()) return;
 
         SeedAdminUser(app, db, logger);
+        SeedEmployeeUser(app, db, logger);
     }
     catch (Exception ex)
     {
@@ -323,19 +323,20 @@ static void SeedFirstAdmin(WebApplication app)
 
 // Writing the account itself, once the checks above have established there is a
 // schema to write it into and nobody to sign in as.
+//
+// Falls back to a fixed demo password ("password") rather than a randomly
+// generated one when nothing is configured - this app is meant to be usable
+// out of the box without hunting through startup logs for a one-time secret,
+// which matters more here than the login being guessable. Anyone actually
+// deploying this sets Seed:AdminPassword (or Seed__AdminPassword) and gets a
+// real one instead.
 static void SeedAdminUser(WebApplication app, InventriaDbContext db, ILogger logger)
 {
     var username = app.Configuration["Seed:AdminUsername"] ?? "admin";
     var password = app.Configuration["Seed:AdminPassword"];
-    var generated = false;
+    var usingDefault = string.IsNullOrWhiteSpace(password);
 
-    if (string.IsNullOrWhiteSpace(password))
-    {
-        // No credential in config, so mint one rather than shipping a default.
-        // It is printed once, here, and never stored in plaintext.
-        password = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18));
-        generated = true;
-    }
+    if (usingDefault) password = "password";
 
     db.Users.Add(new User
     {
@@ -345,15 +346,47 @@ static void SeedAdminUser(WebApplication app, InventriaDbContext db, ILogger log
     });
     db.SaveChanges();
 
-    if (generated)
+    if (usingDefault)
     {
         logger.LogWarning(
-            "Seeded first Admin '{Username}' with a generated password: {Password}\n" +
-            "This is shown only once. Sign in and change it, or set Seed:AdminPassword.",
-            username, password);
+            "Seeded first Admin '{Username}' with the default demo password 'password'. " +
+            "Change it, or set Seed:AdminPassword before this matters.",
+            username);
     }
     else
     {
         logger.LogInformation("Seeded first Admin '{Username}' from configuration.", username);
+    }
+}
+
+// Same idea as SeedAdminUser, for an Employee account to sign in and try the
+// non-Admin side of the app with - a fresh database otherwise has no way to
+// see the Employee dashboard without an Admin first creating one by hand.
+static void SeedEmployeeUser(WebApplication app, InventriaDbContext db, ILogger logger)
+{
+    var username = app.Configuration["Seed:EmployeeUsername"] ?? "employee";
+    var password = app.Configuration["Seed:EmployeePassword"];
+    var usingDefault = string.IsNullOrWhiteSpace(password);
+
+    if (usingDefault) password = "password";
+
+    db.Users.Add(new User
+    {
+        Username = username,
+        Password = BCrypt.Net.BCrypt.HashPassword(password),
+        Role = UserRoles.Employee
+    });
+    db.SaveChanges();
+
+    if (usingDefault)
+    {
+        logger.LogWarning(
+            "Seeded first Employee '{Username}' with the default demo password 'password'. " +
+            "Change it, or set Seed:EmployeePassword before this matters.",
+            username);
+    }
+    else
+    {
+        logger.LogInformation("Seeded first Employee '{Username}' from configuration.", username);
     }
 }
