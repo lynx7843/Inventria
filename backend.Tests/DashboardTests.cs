@@ -101,6 +101,45 @@ public class DashboardTests
     }
 
     [Fact]
+    public async Task An_adjustment_does_not_inflate_received_or_picked_today()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+
+        // A cycle-count correction, not a receipt or a pick - see
+        // StockMovement.TransactionType. Faking a PICK to record a shortfall is
+        // exactly what ADJUST exists to make unnecessary, so both directions are
+        // checked here: neither should move either counter at all.
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = item.Id,
+            WarehouseBinId = bin.Id,
+            TransactionType = "ADJUST",
+            QuantityChanged = -5,
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = "alice",
+            ReasonCode = "Cycle count shortage"
+        });
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = item.Id,
+            WarehouseBinId = bin.Id,
+            TransactionType = "ADJUST",
+            QuantityChanged = 5,
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = "alice",
+            ReasonCode = "Cycle count surplus"
+        });
+        db.Context.SaveChanges();
+
+        var result = await ControllerFor(db).GetEmployeeStats();
+
+        Assert.Equal(0, ApiResult.Number(result, "ReceivedToday"));
+        Assert.Equal(0, ApiResult.Number(result, "PickedToday"));
+    }
+
+    [Fact]
     public async Task An_empty_warehouse_reports_zeros_rather_than_failing()
     {
         using var db = new TestDatabase();
@@ -138,6 +177,36 @@ public class DashboardTests
         // A relocation writes both of its legs, so adding up every row would
         // count those 30 units twice: 100 received + 30 moved = 130.
         Assert.Equal(130, ApiResult.Number(result, "MonthlyThroughput"));
+    }
+
+    [Fact]
+    public async Task Monthly_throughput_does_not_count_adjustments()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+        var inventory = InventoryFor(db);
+
+        inventory.ReceiveStock(new ReceiveStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 50 });
+
+        // A cycle-count correction - nothing arrived at the dock or left it, so
+        // it should not read as a day's throughput any more than the quiet leg
+        // of a RELOCATE does.
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = item.Id,
+            WarehouseBinId = bin.Id,
+            TransactionType = "ADJUST",
+            QuantityChanged = -3,
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = "alice",
+            ReasonCode = "Cycle count shortage"
+        });
+        db.Context.SaveChanges();
+
+        var result = await ControllerFor(db).GetAdminStats();
+
+        Assert.Equal(50, ApiResult.Number(result, "MonthlyThroughput"));
     }
 
     [Fact]

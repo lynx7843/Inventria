@@ -19,6 +19,8 @@ public class InventriaDbContext : DbContext
     public DbSet<Warehouse> Warehouses { get; set; }
     public DbSet<PurchaseOrder> PurchaseOrders { get; set; }
     public DbSet<PurchaseOrderLine> PurchaseOrderLines { get; set; }
+    public DbSet<CountSheet> CountSheets { get; set; }
+    public DbSet<CountSheetLine> CountSheetLines { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -100,6 +102,11 @@ public class InventriaDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(m => m.LotId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Free text, but not unbounded free text - the same reasoning as
+            // Item.Category: past this length it has stopped being a reason
+            // code and started being pasted junk.
+            movement.Property(m => m.ReasonCode).HasMaxLength(200);
         });
 
         // A lot is scoped to one item - "LOT-2026-01" from one supplier means
@@ -305,6 +312,57 @@ public class InventriaDbContext : DbContext
             line.HasOne(l => l.Item)
                 .WithMany()
                 .HasForeignKey(l => l.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CountSheet>(sheet =>
+        {
+            sheet.Property(s => s.Zone).HasMaxLength(64);
+            sheet.Property(s => s.Status).HasMaxLength(32);
+            sheet.Property(s => s.OpenedBy).HasMaxLength(100);
+            sheet.Property(s => s.PostedBy).HasMaxLength(100);
+
+            sheet.Property(s => s.OpenedAt).HasConversion(v => ToUtcForWrite(v), v => AsUtcOnRead(v));
+            sheet.Property(s => s.PostedAt).HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+
+            // Same reasoning as every other Warehouse relationship: retiring a
+            // building is not permission to erase the counts that were once
+            // taken inside it.
+            sheet.HasOne(s => s.Warehouse)
+                .WithMany()
+                .HasForeignKey(s => s.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            sheet.HasMany(s => s.Lines)
+                .WithOne(l => l.CountSheet)
+                .HasForeignKey(l => l.CountSheetId)
+                // A line has no meaning apart from the sheet it belongs to -
+                // same reasoning as PurchaseOrder.Lines above.
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CountSheetLine>(line =>
+        {
+            line.Property(l => l.ReasonCode).HasMaxLength(200);
+
+            // Same reasoning as InventoryBalance/InventoryLotBalance's
+            // relationships: an item, bin or lot outliving a count that once
+            // touched it is fine, but deleting one out from under a count sheet
+            // that still refers to it would leave the audit trail pointing at
+            // nothing.
+            line.HasOne(l => l.Item)
+                .WithMany()
+                .HasForeignKey(l => l.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            line.HasOne(l => l.WarehouseBin)
+                .WithMany()
+                .HasForeignKey(l => l.WarehouseBinId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            line.HasOne(l => l.Lot)
+                .WithMany()
+                .HasForeignKey(l => l.LotId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
