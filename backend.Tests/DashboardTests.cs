@@ -140,6 +140,36 @@ public class DashboardTests
     }
 
     [Fact]
+    public async Task A_restocked_return_is_not_counted_as_todays_receipts()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+
+        // A customer return, not a supplier delivery - see StockMovement and
+        // ReturnsController. Lumping it into ReceivedToday would credit a
+        // shift with a delivery nobody at the dock actually took in.
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = item.Id,
+            WarehouseBinId = bin.Id,
+            TransactionType = "RETURN",
+            QuantityChanged = 5,
+            Timestamp = DateTime.UtcNow,
+            PerformedBy = "alice",
+            ReasonCode = "Customer changed their mind",
+            ConditionGrade = "New",
+            Disposition = "Restock"
+        });
+        db.Context.SaveChanges();
+
+        var result = await ControllerFor(db).GetEmployeeStats();
+
+        Assert.Equal(0, ApiResult.Number(result, "ReceivedToday"));
+        Assert.Equal(0, ApiResult.Number(result, "PickedToday"));
+    }
+
+    [Fact]
     public async Task An_empty_warehouse_reports_zeros_rather_than_failing()
     {
         using var db = new TestDatabase();
