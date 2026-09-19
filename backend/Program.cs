@@ -146,6 +146,7 @@ builder.Services.AddRateLimiter(options =>
 // line-receive endpoint - see StockReceivingService for why the concurrency
 // handling around InventoryBalance.RowVersion has to live in one place.
 builder.Services.AddScoped<StockReceivingService>();
+builder.Services.AddScoped<StockPickingService>();
 
 builder.Services.AddControllers();
 
