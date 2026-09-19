@@ -23,6 +23,8 @@ public class InventriaDbContext : DbContext
     public DbSet<CountSheetLine> CountSheetLines { get; set; }
     public DbSet<PickList> PickLists { get; set; }
     public DbSet<PickListLine> PickListLines { get; set; }
+    public DbSet<Transfer> Transfers { get; set; }
+    public DbSet<TransferLine> TransferLines { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -399,6 +401,61 @@ public class InventriaDbContext : DbContext
             line.HasOne(l => l.WarehouseBin)
                 .WithMany()
                 .HasForeignKey(l => l.WarehouseBinId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Transfer>(transfer =>
+        {
+            transfer.Property(t => t.Status).HasMaxLength(32);
+            transfer.Property(t => t.CreatedBy).HasMaxLength(100);
+            transfer.Property(t => t.ShippedBy).HasMaxLength(100);
+            transfer.Property(t => t.ReceivedBy).HasMaxLength(100);
+
+            transfer.Property(t => t.CreatedAt).HasConversion(v => ToUtcForWrite(v), v => AsUtcOnRead(v));
+            transfer.Property(t => t.ShippedAt).HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+            transfer.Property(t => t.ReceivedAt).HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+
+            // Same reasoning as every other Warehouse relationship: retiring a
+            // building is not permission to erase the transfers that once
+            // moved stock into or out of it.
+            transfer.HasOne(t => t.SourceWarehouse)
+                .WithMany()
+                .HasForeignKey(t => t.SourceWarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            transfer.HasOne(t => t.DestinationWarehouse)
+                .WithMany()
+                .HasForeignKey(t => t.DestinationWarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            transfer.HasMany(t => t.Lines)
+                .WithOne(l => l.Transfer)
+                .HasForeignKey(l => l.TransferId)
+                // A line has no meaning apart from the transfer it belongs to -
+                // same reasoning as PurchaseOrder.Lines above.
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TransferLine>(line =>
+        {
+            line.Property(l => l.LotNumber).HasMaxLength(64);
+
+            line.HasOne(l => l.Item)
+                .WithMany()
+                .HasForeignKey(l => l.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Two relationships to the same WarehouseBins table - EF needs
+            // each one told apart by its own foreign key, since a line's
+            // source and destination are never implied by the other.
+            line.HasOne(l => l.SourceBin)
+                .WithMany()
+                .HasForeignKey(l => l.SourceBinId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            line.HasOne(l => l.DestinationBin)
+                .WithMany()
+                .HasForeignKey(l => l.DestinationBinId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

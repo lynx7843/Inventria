@@ -447,6 +447,23 @@ public class InventoryController : ControllerBase
             return BadRequest(new { Message = "Source and destination bins cannot be the same." });
         }
 
+        var sourceBin = _context.WarehouseBins.Find(request.SourceBinId);
+        if (sourceBin == null)
+        {
+            return NotFound(new { Message = $"Warehouse Bin with ID {request.SourceBinId} not found." });
+        }
+
+        var destinationBinForWarehouseCheck = _context.WarehouseBins.Find(request.DestinationBinId);
+        if (destinationBinForWarehouseCheck != null && destinationBinForWarehouseCheck.WarehouseId != sourceBin.WarehouseId)
+        {
+            // This endpoint writes both legs in one request, which only makes
+            // sense when the stock never leaves the building - within one
+            // warehouse there is no gap for it to be missing from the books
+            // during. Crossing warehouses needs the gap a Transfer's
+            // InTransit state accounts for; see TransfersController.
+            return BadRequest(new { Message = "Source and destination bins are in different warehouses. Use a Transfer to move stock between warehouses." });
+        }
+
         var item = _context.Items.Find(request.ItemId);
         if (item == null)
         {
