@@ -103,7 +103,7 @@ public class ReportsTests
         using var db = new TestDatabase();
         var item = db.AddItem();
         var bin = db.AddBin();
-        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
+        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
         inventory.ReceiveStock(new ReceiveStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 10 });
         inventory.PickStock(new PickStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 4 });
@@ -184,7 +184,7 @@ public class ReportsTests
         using var db = new TestDatabase();
         var item = db.AddItem();
         var bin = db.AddBin();
-        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
+        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
         inventory.ReceiveStock(new ReceiveStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 10 });
         inventory.PickStock(new PickStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 10 });
@@ -280,7 +280,7 @@ public class ReportsTests
         using var db = new TestDatabase();
         var item = db.AddItem();
         var bin = db.AddBin();
-        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
+        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
         inventory.ReceiveStock(new ReceiveStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 50 });
         inventory.PickStock(new PickStockRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 20 });
@@ -300,7 +300,7 @@ public class ReportsTests
         var item = db.AddItem();
         var source = db.AddBin(shelf: "S1");
         var destination = db.AddBin(shelf: "S2");
-        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
+        var inventory = new InventoryController(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
         inventory.ReceiveStock(new ReceiveStockRequest { ItemId = item.Id, WarehouseBinId = source.Id, Quantity = 40 });
         inventory.RelocateStock(new RelocateStockRequest

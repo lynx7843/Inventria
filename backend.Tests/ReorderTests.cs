@@ -22,7 +22,7 @@ public class ReorderTests
     private static DashboardController DashboardFor(TestDatabase db) => new(db.Context);
 
     private static InventoryController InventoryFor(TestDatabase db) =>
-        new(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
+        new(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
     private static List<JsonElement> RowsIn(IActionResult result) =>
         ApiResult.Property(ApiResult.Body(result), "Items").EnumerateArray().ToList();

@@ -12,7 +12,7 @@ public class DashboardTests
     private static DashboardController ControllerFor(TestDatabase db) => new(db.Context);
 
     private static InventoryController InventoryFor(TestDatabase db) =>
-        new(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
+        new(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
     // --- EMPLOYEE --------------------------------------------------------
 

@@ -15,7 +15,7 @@ namespace Inventria.Tests;
 public class LotTrackingTests
 {
     private static InventoryController ControllerFor(TestDatabase db, string username = "alice") =>
-        new(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs(username) };
+        new(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs(username) };
 
     // --- RECEIVE ---------------------------------------------------------
 

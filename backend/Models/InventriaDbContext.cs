@@ -21,6 +21,8 @@ public class InventriaDbContext : DbContext
     public DbSet<PurchaseOrderLine> PurchaseOrderLines { get; set; }
     public DbSet<CountSheet> CountSheets { get; set; }
     public DbSet<CountSheetLine> CountSheetLines { get; set; }
+    public DbSet<PickList> PickLists { get; set; }
+    public DbSet<PickListLine> PickListLines { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -363,6 +365,40 @@ public class InventriaDbContext : DbContext
             line.HasOne(l => l.Lot)
                 .WithMany()
                 .HasForeignKey(l => l.LotId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PickList>(list =>
+        {
+            list.Property(l => l.Status).HasMaxLength(32);
+            list.Property(l => l.CreatedBy).HasMaxLength(100);
+
+            list.Property(l => l.CreatedAt).HasConversion(v => ToUtcForWrite(v), v => AsUtcOnRead(v));
+            list.Property(l => l.CompletedAt).HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+
+            list.HasMany(l => l.Lines)
+                .WithOne(l => l.PickList)
+                .HasForeignKey(l => l.PickListId)
+                // A line has no meaning apart from the list it belongs to -
+                // same reasoning as PurchaseOrder.Lines above.
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PickListLine>(line =>
+        {
+            line.Property(l => l.LotNumber).HasMaxLength(64);
+
+            // Same reasoning as CountSheetLine's relationships: an item or bin
+            // outliving a pick list that once referred to it is fine; deleting
+            // one out from under a list still referring to it is not.
+            line.HasOne(l => l.Item)
+                .WithMany()
+                .HasForeignKey(l => l.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            line.HasOne(l => l.WarehouseBin)
+                .WithMany()
+                .HasForeignKey(l => l.WarehouseBinId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

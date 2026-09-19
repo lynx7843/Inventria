@@ -13,7 +13,7 @@ public class WarehouseBinTests
     private static WarehouseBinsController ControllerFor(TestDatabase db) => new(db.Context);
 
     private static InventoryController InventoryFor(TestDatabase db) =>
-        new(db.Context, new StockReceivingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
+        new(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
 
     [Fact]
     public void Creating_a_bin_trims_its_address()

@@ -14,11 +14,13 @@ public class InventoryController : ControllerBase
 {
     private readonly InventriaDbContext _context;
     private readonly StockReceivingService _receiving;
+    private readonly StockPickingService _picking;
 
-    public InventoryController(InventriaDbContext context, StockReceivingService receiving)
+    public InventoryController(InventriaDbContext context, StockReceivingService receiving, StockPickingService picking)
     {
         _context = context;
         _receiving = receiving;
+        _picking = picking;
     }
 
     private string CurrentUsername => User.FindFirstValue(ClaimTypes.Name)!;
@@ -405,78 +407,30 @@ public class InventoryController : ControllerBase
             return BadRequest(new { Message = $"'{item.Name}' tracks lots. Choose the lot/batch number to pick from." });
         }
 
-        return ExecuteStockMove(() =>
+        var result = _picking.Pick(item.Id, item.TracksLots, request.WarehouseBinId, request.Quantity, CurrentUsername, lotNumber);
+
+        if (result == null)
         {
-            if (item.TracksLots)
+            return Conflict(new { Message = "This stock is being updated by another request. Please try again." });
+        }
+
+        if (result.Outcome == PickOutcome.InsufficientStock)
+        {
+            return BadRequest(new
             {
-                var lot = _context.Lots.FirstOrDefault(l => l.ItemId == request.ItemId && l.LotNumber == lotNumber);
-                var lotBalance = lot == null
-                    ? null
-                    : _context.InventoryLotBalances.FirstOrDefault(b =>
-                        b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId && b.LotId == lot.Id);
-
-                if (lotBalance == null || lotBalance.Quantity < request.Quantity)
-                {
-                    return BadRequest(new { Message = $"Insufficient stock in lot '{lotNumber}' in the specified bin to fulfill this pick." });
-                }
-
-                lotBalance.Quantity -= request.Quantity;
-
-                _context.StockMovements.Add(new StockMovement
-                {
-                    ItemId = request.ItemId,
-                    WarehouseBinId = request.WarehouseBinId,
-                    TransactionType = "PICK",
-                    QuantityChanged = -request.Quantity,
-                    Timestamp = DateTime.UtcNow,
-                    PerformedBy = CurrentUsername,
-                    LotId = lot!.Id
-                });
-
-                _context.SaveChanges();
-
-                return Ok(new {
-                    Message = $"Successfully picked {request.Quantity} units of lot '{lotNumber}' from Bin {request.WarehouseBinId}.",
-                    RemainingBalance = lotBalance.Quantity,
-                    LowStockWarning = LowStockNoticeFor(request.ItemId)
-                });
-            }
-
-            // Check if the inventory balance record exists for this item in this specific bin
-            var balance = _context.InventoryBalances
-                .FirstOrDefault(b => b.ItemId == request.ItemId && b.WarehouseBinId == request.WarehouseBinId);
-
-            if (balance == null || balance.Quantity < request.Quantity)
-            {
-                return BadRequest(new { Message = "Insufficient stock available in the specified bin to fulfill this pick." });
-            }
-
-            // Deduct the inventory
-            balance.Quantity -= request.Quantity;
-
-            // If the bin hits exactly 0, we can choose to remove the row or leave it at 0. Let's keep it to preserve tracking history.
-
-            // Log the movement as a "PICK"
-            var movement = new StockMovement
-            {
-                ItemId = request.ItemId,
-                WarehouseBinId = request.WarehouseBinId,
-                TransactionType = "PICK",
-                QuantityChanged = -request.Quantity, // Negative value signifies stock reduction
-                Timestamp = DateTime.UtcNow,
-                PerformedBy = CurrentUsername
-            };
-            _context.StockMovements.Add(movement);
-
-            _context.SaveChanges();
-
-            // Read after the save, so it describes the shelf as it now stands
-            // rather than as it stood before the units left it.
-            return Ok(new {
-                Message = $"Successfully picked {request.Quantity} units from Bin {request.WarehouseBinId}.",
-                RemainingBalance = balance.Quantity,
-                LowStockWarning = LowStockNoticeFor(request.ItemId)
+                Message = item.TracksLots
+                    ? $"Insufficient stock in lot '{lotNumber}' in the specified bin to fulfill this pick."
+                    : "Insufficient stock available in the specified bin to fulfill this pick."
             });
+        }
+
+        return Ok(new
+        {
+            Message = item.TracksLots
+                ? $"Successfully picked {request.Quantity} units of lot '{lotNumber}' from Bin {request.WarehouseBinId}."
+                : $"Successfully picked {request.Quantity} units from Bin {request.WarehouseBinId}.",
+            RemainingBalance = result.RemainingBalance,
+            LowStockWarning = LowStockNoticeFor(request.ItemId)
         });
     }
 
