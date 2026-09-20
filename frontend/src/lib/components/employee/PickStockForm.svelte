@@ -4,8 +4,7 @@
 	import Button from '$lib/components/shared/Button.svelte';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { apiFetch, apiErrorMessage } from '$lib/api';
-	import { endExpiredSession } from '$lib/auth';
+	import { submitMovementOrQueue } from '$lib/offlineQueue.svelte';
 	import { focusId } from '$lib/keyboard';
 	import {
 		fetchBins,
@@ -62,33 +61,39 @@
 		isLoading = true;
 
 		try {
-			const response = await apiFetch('/api/inventory/pick', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				// No performedBy: the API takes that from the session token.
-				body: JSON.stringify({
-					itemId: Number(itemId),
-					warehouseBinId: Number(warehouseBinId),
-					quantity: units
-				})
-			});
+			const itemName =
+				itemOptions.find((o) => String(o.value) === itemId)?.label ?? `item #${itemId}`;
+			const binName =
+				binOptions.find((o) => String(o.value) === warehouseBinId)?.label ??
+				`bin #${warehouseBinId}`;
 
-			// Status first: a 401 is answered with no body at all, so parsing before
-			// this point turned an expired session into "a network error occurred".
-			if (response.status === 401) {
-				endExpiredSession();
+			// No performedBy: the API takes that from the session token.
+			//
+			// A picked-while-offline movement is exactly what RowVersion on
+			// InventoryBalance exists to catch on replay: if someone else picked
+			// the same bin down in the meantime, resending this once back online
+			// must come back as a conflict to review, not silently apply against
+			// stock that no longer has enough left - see submitMovementOrQueue and
+			// replayQueue.
+			const result = await submitMovementOrQueue(
+				'/api/inventory/pick',
+				{ itemId: Number(itemId), warehouseBinId: Number(warehouseBinId), quantity: units },
+				`Pick ${units} x ${itemName} from ${binName}`
+			);
+
+			if (result.outcome === 'expired') return;
+
+			if (result.outcome === 'rejected') {
+				isError = true;
+				message = result.message;
 				return;
 			}
 
-			if (!response.ok) {
-				throw new Error(await apiErrorMessage(response, 'Failed to process transaction.'));
-			}
+			message =
+				result.outcome === 'queued'
+					? 'No connection - saved offline. This will sync automatically once you are back in range.'
+					: result.data.message;
 
-			const data = await response.json();
-
-			message = data.message;
 			itemId = '';
 			warehouseBinId = '';
 			quantity = '';
