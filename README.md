@@ -68,13 +68,40 @@ Inventria.sln
 ```
 
 ## ⚙️ Requirements
-Before running the project, ensure you have the following installed on your system:
+
+**With Docker Compose:** just Docker (with Compose v2, `docker compose`) or Podman
+(with `podman-compose`). Skip straight to [Quick Start](#-quick-start-docker-compose).
+
+**Without it**, running each piece yourself:
 * ✔️ Node.js
 * ✔️ .NET 9 SDK
 * ✔️ Microsoft SQL Server (a local instance, or the `mssql/server` container image)
 * ✔️ `dotnet-ef` CLI tool - install with `dotnet tool install --global dotnet-ef`
 
-## ▶️ Getting Started
+## 🐳 Quick Start (Docker Compose)
+
+The fastest way to get SQL Server, the API, and the frontend running together,
+including on a machine with no local SQL Server install:
+
+```bash
+docker compose up --build
+```
+
+This builds the API and frontend images, starts SQL Server, waits for it to
+accept connections (via a healthcheck), applies migrations, seeds the first
+Admin/Employee accounts, and starts both dev servers. Open
+<http://localhost:5173> and sign in with `admin` / `password` (or `employee` /
+`password`) once the `api` service logs `Now listening on`.
+
+Everything runs with dev-only default secrets baked into `docker-compose.yml`.
+To override them (a different SA password, a real JWT key, etc.), copy
+`.env.example` to `.env` and set what you need - compose loads it
+automatically. See the file for what each variable does.
+
+Data persists in a named volume across restarts; `docker compose down -v`
+removes it along with the database.
+
+## ▶️ Getting Started (running each piece yourself)
 
 ### 1. Clone the Repository
 ```bash

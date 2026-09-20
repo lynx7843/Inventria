@@ -1,0 +1,77 @@
+# Local dev environment: `docker compose up` gets a working database, API, and
+# frontend without installing SQL Server, the .NET SDK, or Node yourself.
+#
+# All secrets below have dev-only defaults so this runs out of the box. Copy
+# .env.example to .env to override any of them (docker compose loads .env from
+# this directory automatically) - see README.md for the equivalent manual setup.
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Inventria!Dev2026}
+    # No published port: only the `api` service needs to reach this, over the
+    # compose network as `db`. Add "1433:1433" here if you want to point an
+    # external tool (e.g. a GUI client) at it directly - note that collides
+    # with a SQL Server already running on the host's own 1433.
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      # The API's first start races this container accepting connections -
+      # `depends_on: condition: service_healthy` below makes it wait instead.
+      test: [
+        "CMD-SHELL",
+        "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"
+      ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      # Development, not just to match `dotnet run`, but because the API is
+      # served over plain HTTP here - see appsettings.Development.json for why
+      # CookieSecure must be false for that.
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: Server=db;Database=WarehouseDb;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Inventria!Dev2026};TrustServerCertificate=True;
+      Jwt__Key: ${JWT_KEY:-local-docker-compose-dev-key-not-for-production-use-32bytes}
+      Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:-}
+      Seed__EmployeePassword: ${SEED_EMPLOYEE_PASSWORD:-}
+      Cors__AllowedOrigins__0: http://localhost:5173
+    ports:
+      # Published on the same port the README and frontend/.env.example
+      # already assume (PUBLIC_API_BASE_URL=http://localhost:5240).
+      - "5240:8080"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - api
+    environment:
+      PUBLIC_API_BASE_URL: http://localhost:5240
+      # Bind-mounted source below can land on a filesystem Vite's native
+      # watcher doesn't get change events from (common outside native Linux).
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      # :Z relabels the bind mount for SELinux (Fedora/RHEL hosts under
+      # Podman) - harmlessly ignored by Docker/non-SELinux hosts. Without it,
+      # the container gets EACCES reading anything under the mount.
+      - ./frontend:/app:Z
+      - frontend-node-modules:/app/node_modules
+
+volumes:
+  mssql-data:
+  frontend-node-modules:
