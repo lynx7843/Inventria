@@ -1,10 +1,25 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using System.Security.Claims;
+using System.Text.Json;
 
 namespace Inventria.Models;
 
 public class InventriaDbContext : DbContext
 {
-    public InventriaDbContext(DbContextOptions<InventriaDbContext> options) : base(options) { }
+    // Nullable and defaulted rather than required: tests construct this
+    // context directly with just options (see TestDatabase), and the audit
+    // trail below already falls back to "system" with no accessor at all.
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+
+    public InventriaDbContext(DbContextOptions<InventriaDbContext> options) : this(options, null) { }
+
+    public InventriaDbContext(DbContextOptions<InventriaDbContext> options, IHttpContextAccessor? httpContextAccessor)
+        : base(options)
+    {
+        _httpContextAccessor = httpContextAccessor;
+    }
 
     public DbSet<User> Users { get; set; }
     
@@ -27,6 +42,7 @@ public class InventriaDbContext : DbContext
     public DbSet<TransferLine> TransferLines { get; set; }
     public DbSet<BillOfMaterials> BillsOfMaterials { get; set; }
     public DbSet<BillOfMaterialLine> BillOfMaterialLines { get; set; }
+    public DbSet<AuditLog> AuditLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -499,6 +515,20 @@ public class InventriaDbContext : DbContext
                 .HasForeignKey(l => l.ComponentItemId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.Entity<AuditLog>(log =>
+        {
+            log.Property(l => l.Username).HasMaxLength(100);
+            log.Property(l => l.Entity).HasMaxLength(100);
+            log.Property(l => l.EntityId).HasMaxLength(100);
+            log.Property(l => l.Action).HasMaxLength(20);
+
+            log.Property(l => l.Timestamp).HasConversion(v => ToUtcForWrite(v), v => AsUtcOnRead(v));
+
+            // The audit page (AuditLogsController) always reads newest first
+            // and is the only thing that ever queries this table.
+            log.HasIndex(l => l.Timestamp);
+        });
     }
 
     // Shared by every DateTime column above that is written as UtcNow and has
@@ -515,4 +545,158 @@ public class InventriaDbContext : DbContext
 
     private static DateTime? AsUtcOnReadNullable(DateTime? value) =>
         value.HasValue ? AsUtcOnRead(value.Value) : value;
+
+    // Everything below is the audit trail: every insert, update or delete
+    // anywhere in this context is recorded to AuditLogs without each
+    // controller having to remember to do it. Two exclusions -
+    // - AuditLog itself, or logging one would try to log itself.
+    // - StockMovement, which already is a complete record of what happened
+    //   to stock (see its own comment on OnModelCreating); duplicating each
+    //   insert here would say nothing an AuditLog row can that the movement
+    //   itself does not already.
+    public override int SaveChanges()
+    {
+        var (readyLogs, pendingAdds) = CaptureAudits();
+        var result = base.SaveChanges();
+        FinalizeAndPersistAudits(readyLogs, pendingAdds);
+        return result;
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var (readyLogs, pendingAdds) = CaptureAudits();
+        var result = await base.SaveChangesAsync(cancellationToken);
+        await FinalizeAndPersistAuditsAsync(readyLogs, pendingAdds, cancellationToken);
+        return result;
+    }
+
+    // A password hash is not a plaintext credential, but it is still a secret
+    // worth keeping out of a table with wider read access than the Users row
+    // it came from - what matters for the audit trail is that it changed, not
+    // to what.
+    private static readonly HashSet<string> RedactedProperties = new(StringComparer.Ordinal) { "Password" };
+
+    private (List<AuditLog> ReadyLogs, List<(AuditLog Log, EntityEntry Entry)> PendingAdds) CaptureAudits()
+    {
+        var readyLogs = new List<AuditLog>();
+        var pendingAdds = new List<(AuditLog, EntityEntry)>();
+        var username = CurrentUsername();
+
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.Entity is AuditLog or StockMovement) continue;
+
+            switch (entry.State)
+            {
+                case EntityState.Added:
+                    // Deliberately not filled in here: an identity column's
+                    // real value - Id included - does not exist until the
+                    // save this row is part of actually runs. Both EntityId
+                    // and NewValue are filled in afterward, from the same
+                    // entry, in FinalizeAndPersistAudits(Async).
+                    var addLog = new AuditLog
+                    {
+                        Username = username,
+                        Entity = entry.Entity.GetType().Name,
+                        Action = "Create"
+                    };
+                    pendingAdds.Add((addLog, entry));
+                    readyLogs.Add(addLog);
+                    break;
+
+                case EntityState.Modified:
+                    var changed = entry.Properties
+                        .Where(property => property.IsModified && !Equals(property.OriginalValue, property.CurrentValue))
+                        .ToList();
+
+                    // AttachAndUpdate-style code can mark every property
+                    // Modified even when nothing actually differs - nothing
+                    // here is worth a row saying so.
+                    if (changed.Count == 0) break;
+
+                    readyLogs.Add(new AuditLog
+                    {
+                        Username = username,
+                        Entity = entry.Entity.GetType().Name,
+                        EntityId = FormatKey(entry),
+                        Action = "Update",
+                        OldValue = SerializeValues(changed, property => property.OriginalValue),
+                        NewValue = SerializeValues(changed, property => property.CurrentValue)
+                    });
+                    break;
+
+                case EntityState.Deleted:
+                    readyLogs.Add(new AuditLog
+                    {
+                        Username = username,
+                        Entity = entry.Entity.GetType().Name,
+                        EntityId = FormatKey(entry),
+                        Action = "Delete",
+                        OldValue = SerializeValues(entry.Properties, property => property.OriginalValue)
+                    });
+                    break;
+            }
+        }
+
+        return (readyLogs, pendingAdds);
+    }
+
+    // An Added row's key - and any other database-generated column, though
+    // none of these entities have one apart from Id - is whatever EF assigned
+    // during the SaveChanges call that just finished, unknowable before it
+    // since these are all identity columns. Both EntityId and NewValue are
+    // filled in now, from the same entry, for that reason.
+    private void FinalizeAndPersistAudits(List<AuditLog> readyLogs, List<(AuditLog Log, EntityEntry Entry)> pendingAdds)
+    {
+        if (readyLogs.Count == 0) return;
+
+        foreach (var (log, entry) in pendingAdds)
+        {
+            log.EntityId = FormatKey(entry);
+            log.NewValue = SerializeValues(entry.Properties, property => property.CurrentValue);
+        }
+
+        AuditLogs.AddRange(readyLogs);
+        base.SaveChanges();
+    }
+
+    private async Task FinalizeAndPersistAuditsAsync(
+        List<AuditLog> readyLogs, List<(AuditLog Log, EntityEntry Entry)> pendingAdds, CancellationToken cancellationToken)
+    {
+        if (readyLogs.Count == 0) return;
+
+        foreach (var (log, entry) in pendingAdds)
+        {
+            log.EntityId = FormatKey(entry);
+            log.NewValue = SerializeValues(entry.Properties, property => property.CurrentValue);
+        }
+
+        AuditLogs.AddRange(readyLogs);
+        await base.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string FormatKey(EntityEntry entry) =>
+        string.Join(",", entry.Properties
+            .Where(property => property.Metadata.IsPrimaryKey())
+            .Select(property => property.CurrentValue?.ToString() ?? ""));
+
+    private static string SerializeValues(IEnumerable<PropertyEntry> properties, Func<PropertyEntry, object?> select)
+    {
+        var values = new Dictionary<string, object?>();
+
+        foreach (var property in properties)
+        {
+            var name = property.Metadata.Name;
+            values[name] = RedactedProperties.Contains(name) ? "***" : select(property);
+        }
+
+        return JsonSerializer.Serialize(values);
+    }
+
+    // Startup seeding (SeedFirstAdmin) writes through this same context with
+    // no HTTP request behind it, and a test's TestDatabase never supplies an
+    // accessor at all - both cases are a real, deliberate change with nobody
+    // signed in to attribute it to.
+    private string CurrentUsername() =>
+        _httpContextAccessor?.HttpContext?.User?.FindFirstValue(ClaimTypes.Name) ?? "system";
 }
