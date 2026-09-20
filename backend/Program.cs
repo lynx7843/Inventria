@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
+using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
 using System.Globalization;
@@ -260,6 +261,12 @@ SeedFirstAdmin(app);
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+
+    // A browsable page over the same document MapOpenApi serves, defaulting
+    // to /scalar/v1. Same guard as MapOpenApi and for the same reason - a
+    // page listing every route (including Users, Admin-only) is not
+    // something to expose outside Development.
+    app.MapScalarApiReference();
 }
 
 // Skipped in Development: the `https` profile listens on both :7149 and :5240,
