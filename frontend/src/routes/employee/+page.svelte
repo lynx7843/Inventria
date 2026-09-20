@@ -9,6 +9,7 @@
 	import { endExpiredSession, requireSession } from '$lib/auth';
 	import { resolve } from '$app/paths';
 	import { fetchItemPage, isLowStock, type Item } from '$lib/inventory';
+	import { isTypingInField } from '$lib/keyboard';
 
 	// Gates the markup below. No role list: the stock movements on this page are
 	// open to Admins as well, so this only requires that someone is signed in.
@@ -39,6 +40,27 @@
 
 	// Track which transaction form is visible
 	let activeTab = $state('receive');
+
+	// Warehouse staff work in gloves at speed - a mouse click to switch tabs is
+	// the slow path. One key per tab, digits because they need no modifier and
+	// nothing else on this page reads a bare digit keystroke.
+	const tabShortcuts = [
+		{ key: '1', tab: 'receive', label: 'Receive' },
+		{ key: '2', tab: 'pick', label: 'Pick' },
+		{ key: '3', tab: 'relocate', label: 'Relocate' }
+	];
+
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		// isTypingInField first: someone keying a quantity or a SKU into a field
+		// must never have a digit hijacked into switching tabs out from under them.
+		if (isTypingInField(event.target) || event.altKey || event.ctrlKey || event.metaKey) return;
+
+		const shortcut = tabShortcuts.find((s) => s.key === event.key);
+		if (!shortcut) return;
+
+		event.preventDefault();
+		activeTab = shortcut.tab;
+	}
 
 	// Fetch data as soon as the page loads
 	onMount(async () => {
@@ -88,6 +110,8 @@
 		}
 	}
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 {#if allowed}
 	<Sidebar activePage="Dashboard" />
@@ -165,6 +189,13 @@
 				⇄ Relocate
 			</button>
 		</div>
+		<p class="shortcut-hint">
+			{#each tabShortcuts as shortcut, i (shortcut.key)}
+				{i > 0 ? ' · ' : ''}<kbd>{shortcut.key}</kbd>
+				{shortcut.label}
+			{/each}
+			· <kbd>Enter</kbd> submits the open form
+		</p>
 
 		<!-- CONDITIONALLY RENDER THE ACTIVE FORM -->
 		{#if activeTab === 'receive'}
@@ -372,6 +403,26 @@
 	.tab-btn.active {
 		background: #dcfce7;
 		color: #0b6b36;
+	}
+
+	.shortcut-hint {
+		margin: 0 0 1.5rem 0;
+		font-size: 0.8rem;
+		color: #64748b;
+	}
+	kbd {
+		display: inline-block;
+		min-width: 1.1rem;
+		padding: 0.1rem 0.4rem;
+		border: 1px solid #cbd5e1;
+		border-bottom-width: 2px;
+		border-radius: 4px;
+		background: #f8fafc;
+		font-family: inherit;
+		font-size: 0.75rem;
+		font-weight: 700;
+		color: #334155;
+		text-align: center;
 	}
 
 	.panel {

@@ -6,6 +6,7 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession } from '$lib/auth';
+	import { focusId } from '$lib/keyboard';
 	import {
 		fetchBins,
 		fetchAllItems,
@@ -91,6 +92,10 @@
 			itemId = '';
 			warehouseBinId = '';
 			quantity = '';
+
+			// See ReceiveStockForm: the next pick is almost always a different line,
+			// so back to the top rather than left on the just-clicked button.
+			focusId('pick-item-id');
 		} catch (err) {
 			isError = true;
 			message = err instanceof Error ? err.message : 'A network error occurred.';
@@ -122,6 +127,7 @@
 				placeholder="Select an item"
 				emptyLabel={isLoadingOptions ? 'Loading...' : 'No items defined yet'}
 				required={true}
+				autofocus={true}
 			/>
 			<SelectField
 				id="pick-bin-id"

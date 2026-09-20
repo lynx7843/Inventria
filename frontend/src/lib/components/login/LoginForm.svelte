@@ -4,6 +4,7 @@
 	import Button from '$lib/components/shared/Button.svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { saveSession, homeFor } from '$lib/auth';
+	import { focusId } from '$lib/keyboard';
 
 	// Svelte 5 state variables
 	let username = $state('');
@@ -52,6 +53,13 @@
 		} catch (err) {
 			// Catch network errors (like the backend being turned off) or invalid credentials
 			errorMsg = err instanceof Error ? err.message : 'Failed to connect to the database.';
+
+			// A rejected sign-in almost always means the password, not the
+			// username, was wrong - clear it and put the cursor back in it rather
+			// than leave focus on the button a retry would otherwise need a click
+			// to get past.
+			password = '';
+			focusId('password');
 		} finally {
 			isLoading = false;
 		}
@@ -70,6 +78,7 @@
 		placeholder="Enter employee ID"
 		bind:value={username}
 		required={true}
+		autofocus={true}
 	/>
 
 	<!-- "Forgot?" was a link to nowhere. There is no reset flow to send anyone to

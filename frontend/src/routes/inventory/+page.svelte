@@ -6,6 +6,7 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
+	import { focusId, isTypingInField } from '$lib/keyboard';
 	import { fetchItemPage, isLowStock, parseLevel, type Item } from '$lib/inventory';
 
 	// Gates the markup below. No role list: Admins and Employees both manage
@@ -205,6 +206,27 @@
 
 	function closeForm() {
 		showForm = false;
+
+		// See bins/+page.svelte: whatever had focus (Cancel, or the
+		// just-submitted Save) is gone the moment the panel closes.
+		focusId('add-item-trigger');
+	}
+
+	// See bins/+page.svelte for both shortcuts and why Escape alone ignores
+	// isTypingInField.
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && showForm) {
+			event.preventDefault();
+			closeForm();
+			return;
+		}
+
+		if (isTypingInField(event.target) || event.altKey || event.ctrlKey || event.metaKey) return;
+
+		if (event.key === 'n' && !showForm) {
+			event.preventDefault();
+			openNewForm();
+		}
 	}
 
 	// The table already holds everything this exports - one page of the
@@ -255,6 +277,8 @@
 	}
 </script>
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+
 {#if allowed}
 	<Sidebar activePage="Inventory" />
 	<Header />
@@ -270,7 +294,9 @@
 					>Export CSV</button
 				>
 				{#if !showForm}
-					<button class="btn-solid" onclick={openNewForm}>+ Add New SKU</button>
+					<button id="add-item-trigger" class="btn-solid" onclick={openNewForm}>
+						+ Add New SKU <kbd>N</kbd>
+					</button>
 				{/if}
 			</div>
 		</div>
@@ -296,6 +322,7 @@
 							placeholder="e.g., SKU-100"
 							bind:value={sku}
 							required={true}
+							autofocus={true}
 						/>
 						<InputField
 							id="name"
@@ -468,6 +495,20 @@
 		border-radius: 6px;
 		font-weight: 600;
 		cursor: pointer;
+	}
+	.btn-solid kbd {
+		margin-left: 0.35rem;
+		display: inline-block;
+		min-width: 1.1rem;
+		padding: 0.05rem 0.35rem;
+		border: 1px solid rgb(255 255 255 / 40%);
+		border-bottom-width: 2px;
+		border-radius: 4px;
+		background: rgb(255 255 255 / 15%);
+		font-family: inherit;
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-align: center;
 	}
 	.btn-outline {
 		background: white;

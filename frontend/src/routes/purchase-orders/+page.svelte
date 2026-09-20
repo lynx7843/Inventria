@@ -7,6 +7,7 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
+	import { focusId, isTypingInField } from '$lib/keyboard';
 	import {
 		fetchAllItems,
 		fetchBins,
@@ -204,6 +205,27 @@
 
 	function closeForm() {
 		showForm = false;
+
+		// See bins/+page.svelte: whatever had focus (Cancel, or the
+		// just-submitted Save) is gone the moment the panel closes.
+		focusId('create-po-trigger');
+	}
+
+	// See bins/+page.svelte for both shortcuts and why Escape alone ignores
+	// isTypingInField.
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && showForm) {
+			event.preventDefault();
+			closeForm();
+			return;
+		}
+
+		if (isTypingInField(event.target) || event.altKey || event.ctrlKey || event.metaKey) return;
+
+		if (event.key === 'n' && !showForm) {
+			event.preventDefault();
+			openCreateForm();
+		}
 	}
 
 	function addLine() {
@@ -489,6 +511,8 @@
 	}
 </script>
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+
 {#if allowed}
 	<Sidebar activePage="Purchase Orders" />
 	<Header />
@@ -500,7 +524,9 @@
 				<p>What is on order, what has arrived, and what is still short.</p>
 			</div>
 			{#if !showForm}
-				<button class="btn-solid" onclick={openCreateForm}>+ New Purchase Order</button>
+				<button id="create-po-trigger" class="btn-solid" onclick={openCreateForm}>
+					+ New Purchase Order <kbd>N</kbd>
+				</button>
 			{/if}
 		</div>
 
@@ -528,6 +554,7 @@
 								placeholder="Select a supplier"
 								emptyLabel={isLoadingPickers ? 'Loading...' : 'No suppliers yet'}
 								required={true}
+								autofocus={true}
 							/>
 							{#if !showNewSupplier}
 								<button type="button" class="link-btn" onclick={() => (showNewSupplier = true)}>
@@ -927,6 +954,20 @@
 		border-radius: 6px;
 		font-weight: 600;
 		cursor: pointer;
+	}
+	.btn-solid kbd {
+		margin-left: 0.35rem;
+		display: inline-block;
+		min-width: 1.1rem;
+		padding: 0.05rem 0.35rem;
+		border: 1px solid rgb(255 255 255 / 40%);
+		border-bottom-width: 2px;
+		border-radius: 4px;
+		background: rgb(255 255 255 / 15%);
+		font-family: inherit;
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-align: center;
 	}
 	.btn-solid:disabled {
 		background: #94a3b8;
