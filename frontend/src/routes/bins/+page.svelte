@@ -6,6 +6,7 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
+	import { focusId, isTypingInField } from '$lib/keyboard';
 	import type { WarehouseBin } from '$lib/inventory';
 
 	// Gates the markup below. No role list: bins are part of the warehouse map
@@ -141,8 +142,36 @@
 
 	function closeForm() {
 		showForm = false;
+
+		// Returns focus to the button that opens this same panel, since
+		// whatever had it (Cancel, or the just-submitted Save) is gone the
+		// moment the panel closes - otherwise focus falls back to the page
+		// body and a keyboard user has to hunt for it again.
+		focusId('add-bin-trigger');
+	}
+
+	// "N" opens the create form - guarded by isTypingInField (see
+	// employee/+page.svelte) so it never hijacks a letter meant for a field.
+	// Escape closes whichever form is open and is deliberately NOT guarded by
+	// isTypingInField: cancelling out of a field you are actively typing in is
+	// the single most common time to reach for it.
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && showForm) {
+			event.preventDefault();
+			closeForm();
+			return;
+		}
+
+		if (isTypingInField(event.target) || event.altKey || event.ctrlKey || event.metaKey) return;
+
+		if (event.key === 'n' && !showForm) {
+			event.preventDefault();
+			openNewForm();
+		}
 	}
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 {#if allowed}
 	<Sidebar activePage="Bins" />
@@ -157,7 +186,9 @@
 				</p>
 			</div>
 			{#if !showForm}
-				<button class="btn-solid" onclick={openNewForm}>+ Add New Bin</button>
+				<button id="add-bin-trigger" class="btn-solid" onclick={openNewForm}>
+					+ Add New Bin <kbd>N</kbd>
+				</button>
 			{/if}
 		</div>
 
@@ -182,6 +213,7 @@
 							placeholder="e.g., Electronics"
 							bind:value={zone}
 							required={true}
+							autofocus={true}
 						/>
 						<InputField
 							id="aisle"
@@ -280,6 +312,20 @@
 		border-radius: 6px;
 		font-weight: 600;
 		cursor: pointer;
+	}
+	.btn-solid kbd {
+		margin-left: 0.35rem;
+		display: inline-block;
+		min-width: 1.1rem;
+		padding: 0.05rem 0.35rem;
+		border: 1px solid rgb(255 255 255 / 40%);
+		border-bottom-width: 2px;
+		border-radius: 4px;
+		background: rgb(255 255 255 / 15%);
+		font-family: inherit;
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-align: center;
 	}
 	.btn-outline {
 		background: white;

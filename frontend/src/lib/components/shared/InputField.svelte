@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { HTMLInputAttributes } from 'svelte/elements';
+	import { focusOnMount } from '$lib/keyboard';
 
 	// Using Svelte 5 $bindable() so the parent can read what the user types
 	// min/step apply to number inputs and are left off everything else: passing
@@ -13,7 +14,8 @@
 		value = $bindable(),
 		required = false,
 		min = undefined,
-		step = undefined
+		step = undefined,
+		autofocus = false
 	}: {
 		id: string;
 		label: string;
@@ -23,12 +25,24 @@
 		required?: boolean;
 		min?: number;
 		step?: number;
+		// See focusOnMount: set on whichever field should get the cursor the
+		// moment this form appears.
+		autofocus?: boolean;
 	} = $props();
 </script>
 
 <div class="input-group">
 	<label for={id}>{label}</label>
-	<input {type} {id} bind:value {placeholder} {required} {min} {step} />
+	<input
+		{type}
+		{id}
+		bind:value
+		{placeholder}
+		{required}
+		{min}
+		{step}
+		use:focusOnMount={autofocus}
+	/>
 </div>
 
 <style>

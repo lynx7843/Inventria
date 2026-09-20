@@ -18,7 +18,8 @@
 		placeholder = 'Select...',
 		emptyLabel = 'None available',
 		required = false,
-		disabled = false
+		disabled = false,
+		autofocus = false
 	}: {
 		id: string;
 		label: string;
@@ -28,12 +29,43 @@
 		emptyLabel?: string;
 		required?: boolean;
 		disabled?: boolean;
+		// See InputField / focusOnMount - but this element can't act on it the
+		// same way, so it isn't passed to that action here. See the $effect
+		// below instead.
+		autofocus?: boolean;
 	} = $props();
+
+	let selectEl: HTMLSelectElement | undefined = $state();
+	let hasAutofocused = false;
+
+	// A disabled element refuses .focus() outright, and this select starts
+	// disabled - options arrive from an API call that has not resolved yet at
+	// mount, which is exactly when a plain mount-time action would try and
+	// silently fail. Effect rather than action so it can wait for options to
+	// actually exist and try again once they do; `hasAutofocused` keeps it to
+	// one attempt so a later, unrelated options refresh can't steal focus back
+	// from wherever the person has since moved to.
+	$effect(() => {
+		if (autofocus && !hasAutofocused && options.length > 0 && selectEl) {
+			hasAutofocused = true;
+			selectEl.focus();
+			// See InputField's focusOnMount for why: SvelteKit's post-navigation
+			// focus reset prefers a real `autofocus` attribute over its own
+			// fallback to <body>.
+			selectEl.setAttribute('autofocus', '');
+		}
+	});
 </script>
 
 <div class="input-group">
 	<label for={id}>{label}</label>
-	<select {id} bind:value {required} disabled={disabled || options.length === 0}>
+	<select
+		{id}
+		bind:value
+		bind:this={selectEl}
+		{required}
+		disabled={disabled || options.length === 0}
+	>
 		<option value="" disabled selected>
 			{options.length === 0 ? emptyLabel : placeholder}
 		</option>

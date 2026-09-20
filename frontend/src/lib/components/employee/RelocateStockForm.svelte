@@ -6,6 +6,7 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession } from '$lib/auth';
+	import { focusId } from '$lib/keyboard';
 	import {
 		fetchBins,
 		fetchAllItems,
@@ -108,6 +109,10 @@
 			sourceBinId = '';
 			destBinId = '';
 			quantity = '';
+
+			// See ReceiveStockForm: back to the top for the next move rather than
+			// left on the just-clicked button.
+			focusId('rel-item-id');
 		} catch (err) {
 			isError = true;
 			message = err instanceof Error ? err.message : 'A network error occurred.';
@@ -139,6 +144,7 @@
 				placeholder="Select an item"
 				emptyLabel={isLoadingOptions ? 'Loading...' : 'No items defined yet'}
 				required={true}
+				autofocus={true}
 			/>
 			<SelectField
 				id="rel-source-bin"

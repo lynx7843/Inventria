@@ -6,6 +6,7 @@
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession } from '$lib/auth';
+	import { focusId } from '$lib/keyboard';
 	import {
 		fetchBins,
 		fetchAllItems,
@@ -101,6 +102,11 @@
 			itemId = '';
 			warehouseBinId = '';
 			quantity = '';
+
+			// The next arrival is almost always a different item into the same or
+			// another bin - back to the top rather than left on the button a click
+			// or the Enter that just fired would still be sitting on.
+			focusId('item-id');
 		} catch (err) {
 			isError = true;
 			message = err instanceof Error ? err.message : 'An network error occurred.';
@@ -132,6 +138,7 @@
 				placeholder="Select an item"
 				emptyLabel={isLoadingOptions ? 'Loading...' : 'No items defined yet'}
 				required={true}
+				autofocus={true}
 			/>
 			<SelectField
 				id="bin-id"
