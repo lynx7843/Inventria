@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using System.Globalization;
@@ -44,6 +45,13 @@ builder.Services.AddCors(options =>
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<InventriaDbContext>(options =>
     options.UseSqlServer(connectionString));
+
+// Backs GET /health below - what Docker's healthcheck, a reverse proxy, or
+// any future uptime monitor pings to ask "is this instance usable". A custom
+// check rather than the framework's AddDbContextCheck: that extension lives
+// in the separate Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore
+// package, and CanConnectAsync alone is enough to answer up/down.
+builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
 // 3. Configure JWT Authentication
 // The signing key is a secret and is never committed: supply it through
@@ -264,6 +272,14 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Deliberately unauthenticated and outside MapControllers' conventions - a
+// health check a monitor can't reach without first getting a token isn't one
+// it can use. The default response writer (no custom one configured) only
+// ever prints the overall status ("Healthy"/"Unhealthy"), never the
+// exception or connection string a failing AddDbContextCheck would otherwise
+// have access to.
+app.MapHealthChecks("/health");
+
 app.MapControllers();
 
 app.Run();
@@ -388,5 +404,27 @@ static void SeedEmployeeUser(WebApplication app, InventriaDbContext db, ILogger 
     else
     {
         logger.LogInformation("Seeded first Employee '{Username}' from configuration.", username);
+    }
+}
+
+// Backs GET /health. Reports only Healthy/Unhealthy - never the exception -
+// which matters because CanConnectAsync's failure mode can be a timeout that
+// carries the connection string in its message, and this endpoint takes no
+// credentials.
+sealed class DatabaseHealthCheck(InventriaDbContext db) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await db.Database.CanConnectAsync(cancellationToken)
+                ? HealthCheckResult.Healthy()
+                : HealthCheckResult.Unhealthy();
+        }
+        catch
+        {
+            return HealthCheckResult.Unhealthy();
+        }
     }
 }

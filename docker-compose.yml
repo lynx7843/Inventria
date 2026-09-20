@@ -51,13 +51,23 @@ services:
       # Published on the same port the README and frontend/.env.example
       # already assume (PUBLIC_API_BASE_URL=http://localhost:5240).
       - "5240:8080"
+    healthcheck:
+      # backend/Program.cs's GET /health - deliberately unauthenticated and
+      # reports only up/down. `frontend`'s condition: service_healthy below
+      # waits on this rather than just the container existing.
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     environment:
       PUBLIC_API_BASE_URL: http://localhost:5240
       # Bind-mounted source below can land on a filesystem Vite's native
