@@ -9,11 +9,31 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
+using Serilog;
+using Serilog.Events;
 using System.Globalization;
 using System.Text;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Replaces the default console-only logger with one that also writes to a
+// rolling file, so the seed warnings below (the generated/default admin and
+// employee passwords) and everything else survive the terminal that printed
+// them closing. Levels are hardcoded rather than read from the "Logging"
+// section of appsettings.json, matching what that section already specifies
+// - Serilog does not use Microsoft.Extensions.Logging's filtering pipeline,
+// so once it owns logging that section stops doing anything.
+builder.Host.UseSerilog((context, configuration) => configuration
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.File(
+        Path.Combine(context.HostingEnvironment.ContentRootPath, "logs", "inventria-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        shared: true));
 
 // 1. Add CORS policy
 // Origins come from configuration so a deployment can point at its real
@@ -226,6 +246,12 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+// First so it wraps every middleware below it. Logs method, path, status
+// code and elapsed time only - never headers or the request body, which
+// matters here specifically because POST /api/Auth/login's body is a
+// plaintext password and a log file is exactly the wrong place for it.
+app.UseSerilogRequestLogging();
+
 // 4. Seed the first Admin account.
 // Registration requires an existing Admin token, so a brand new database would
 // otherwise have no way to create its first user.
@@ -346,7 +372,7 @@ static void SeedFirstAdmin(WebApplication app)
 // which matters more here than the login being guessable. Anyone actually
 // deploying this sets Seed:AdminPassword (or Seed__AdminPassword) and gets a
 // real one instead.
-static void SeedAdminUser(WebApplication app, InventriaDbContext db, ILogger logger)
+static void SeedAdminUser(WebApplication app, InventriaDbContext db, Microsoft.Extensions.Logging.ILogger logger)
 {
     var username = app.Configuration["Seed:AdminUsername"] ?? "admin";
     var password = app.Configuration["Seed:AdminPassword"];
@@ -378,7 +404,7 @@ static void SeedAdminUser(WebApplication app, InventriaDbContext db, ILogger log
 // Same idea as SeedAdminUser, for an Employee account to sign in and try the
 // non-Admin side of the app with - a fresh database otherwise has no way to
 // see the Employee dashboard without an Admin first creating one by hand.
-static void SeedEmployeeUser(WebApplication app, InventriaDbContext db, ILogger logger)
+static void SeedEmployeeUser(WebApplication app, InventriaDbContext db, Microsoft.Extensions.Logging.ILogger logger)
 {
     var username = app.Configuration["Seed:EmployeeUsername"] ?? "employee";
     var password = app.Configuration["Seed:EmployeePassword"];
