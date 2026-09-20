@@ -29,6 +29,13 @@ RUN dotnet tool install --global dotnet-ef --version 9.* \
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 WORKDIR /app
+
+# curl backs docker-compose.yml's healthcheck against GET /health - this
+# image otherwise has neither curl nor wget.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app/publish .
 COPY backend/docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh efbundle
