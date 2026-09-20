@@ -63,6 +63,12 @@ builder.Services.AddCors(options =>
 });
 
 // 2. Add database connection
+// Backs InventriaDbContext's audit trail (see its SaveChanges override),
+// which reads the signed-in username off the current request. AddDbContext
+// resolves the context's IHttpContextAccessor constructor parameter from
+// this automatically.
+builder.Services.AddHttpContextAccessor();
+
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<InventriaDbContext>(options =>
     options.UseSqlServer(connectionString));
