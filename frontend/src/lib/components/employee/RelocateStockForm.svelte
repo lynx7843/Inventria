@@ -4,8 +4,7 @@
 	import Button from '$lib/components/shared/Button.svelte';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { apiFetch, apiErrorMessage } from '$lib/api';
-	import { endExpiredSession } from '$lib/auth';
+	import { submitMovementOrQueue } from '$lib/offlineQueue.svelte';
 	import { focusId } from '$lib/keyboard';
 	import {
 		fetchBins,
@@ -77,34 +76,38 @@
 		isLoading = true;
 
 		try {
-			const response = await apiFetch('/api/inventory/relocate', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				// No performedBy: the API takes that from the session token.
-				body: JSON.stringify({
+			const itemName =
+				itemOptions.find((o) => String(o.value) === itemId)?.label ?? `item #${itemId}`;
+			const sourceName =
+				binOptions.find((o) => String(o.value) === sourceBinId)?.label ?? `bin #${sourceBinId}`;
+			const destName =
+				binOptions.find((o) => String(o.value) === destBinId)?.label ?? `bin #${destBinId}`;
+
+			// No performedBy: the API takes that from the session token.
+			const result = await submitMovementOrQueue(
+				'/api/inventory/relocate',
+				{
 					itemId: Number(itemId),
 					sourceBinId: Number(sourceBinId),
 					destinationBinId: Number(destBinId),
 					quantity: units
-				})
-			});
+				},
+				`Move ${units} x ${itemName} from ${sourceName} to ${destName}`
+			);
 
-			// Status first: a 401 is answered with no body at all, so parsing before
-			// this point turned an expired session into "a network error occurred".
-			if (response.status === 401) {
-				endExpiredSession();
+			if (result.outcome === 'expired') return;
+
+			if (result.outcome === 'rejected') {
+				isError = true;
+				message = result.message;
 				return;
 			}
 
-			if (!response.ok) {
-				throw new Error(await apiErrorMessage(response, 'Failed to process transaction.'));
-			}
+			message =
+				result.outcome === 'queued'
+					? 'No connection - saved offline. This will sync automatically once you are back in range.'
+					: result.data.message;
 
-			const data = await response.json();
-
-			message = data.message;
 			itemId = '';
 			sourceBinId = '';
 			destBinId = '';
