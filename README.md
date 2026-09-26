@@ -156,6 +156,18 @@ dotnet run
 Wait for `Now listening on: http://localhost:5240`. The first start takes around
 15 seconds. Stop it with `Ctrl+C`.
 
+> **Timezone:** figures like the employee dashboard's "received today" and the
+> movements report's date filters need to know where one day ends and the next
+> begins. Unset, that is the UTC day, which is wrong by a few hours for any
+> warehouse not on UTC. Set `Warehouse:TimeZone` to say which zone the floor
+> keeps:
+> ```bash
+> export Warehouse__TimeZone="Australia/Sydney"
+> ```
+> Timestamps are still stored in UTC - only the boundary moves. An id this
+> system does not recognise stops the API starting rather than quietly
+> reporting the wrong day.
+
 > **Note:** if `dotnet` is not on your `PATH` because the SDK lives in `~/.dotnet`,
 > export it first (worth adding to `~/.bashrc`):
 > ```bash

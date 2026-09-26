@@ -176,6 +176,12 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 
+// Where this warehouse's days start and end. Resolved once here rather than
+// per request: the zone cannot change while the app runs, and an id the system
+// does not recognise should stop startup the way a missing Jwt:Key does instead
+// of surfacing as a dashboard that is wrong by a few hours. See WarehouseClock.
+builder.Services.AddSingleton(WarehouseClock.FromConfiguration(builder.Configuration));
+
 // Shared by InventoryController's POST /receive and PurchaseOrdersController's
 // line-receive endpoint - see StockReceivingService for why the concurrency
 // handling around InventoryBalance.RowVersion has to live in one place.

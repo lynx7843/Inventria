@@ -1,3 +1,4 @@
+using Inventria;
 using Inventria.Controllers;
 using Inventria.Models;
 
@@ -10,7 +11,8 @@ namespace Inventria.Tests;
 /// </summary>
 public class ReportsTests
 {
-    private static ReportsController ControllerFor(TestDatabase db) => new(db.Context);
+    private static ReportsController ControllerFor(TestDatabase db, WarehouseClock? clock = null) =>
+        new(db.Context, clock ?? WarehouseClock.Utc);
 
     // --- STOCK ON HAND -----------------------------------------------------
 
@@ -129,10 +131,67 @@ public class ReportsTests
         db.Context.SaveChanges();
 
         var result = ControllerFor(db).GetMovements(
-            from: DateTime.UtcNow.AddDays(-10), to: null, type: null, itemId: null, performedBy: null,
+            from: DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-10), to: null, type: null, itemId: null, performedBy: null,
             page: 1, pageSize: 25);
 
         Assert.Equal(0, ApiResult.Number(result, "TotalCount"));
+    }
+
+    private static void AddMovement(TestDatabase db, Item item, WarehouseBin bin, DateTime utcTimestamp)
+    {
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = item.Id, WarehouseBinId = bin.Id, TransactionType = "RECEIVE",
+            QuantityChanged = 10, Timestamp = utcTimestamp, PerformedBy = "alice"
+        });
+        db.Context.SaveChanges();
+    }
+
+    [Fact]
+    public void A_range_ending_today_includes_todays_movements()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        AddMovement(db, item, bin, DateTime.UtcNow);
+
+        var result = ControllerFor(db).GetMovements(
+            from: today, to: today, type: null, itemId: null, performedBy: null, page: 1, pageSize: 25);
+
+        // `to` used to be compared with <= against the date itself, and a bare
+        // date is its midnight - so asking for a range ending today returned
+        // nothing that happened today, which is most of what anyone looks for.
+        Assert.Equal(1, ApiResult.Number(result, "TotalCount"));
+    }
+
+    [Fact]
+    public void A_range_is_the_warehouses_days_not_utcs()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+
+        // Ten hours ahead of UTC, as a fixed zone so this does not depend on a
+        // tzdata release. See WarehouseClockTests for the daylight-saving cases.
+        var clock = new WarehouseClock(TimeZoneInfo.CreateCustomTimeZone(
+            "Test/UtcPlus10", TimeSpan.FromHours(10), "UTC+10", "UTC+10"));
+
+        // 01:00 on the 26th in the warehouse, still the 25th in UTC.
+        AddMovement(db, item, bin, new DateTime(2026, 9, 25, 15, 0, 0, DateTimeKind.Utc));
+
+        // 23:00 on the 25th in the warehouse, also the 25th in UTC.
+        AddMovement(db, item, bin, new DateTime(2026, 9, 25, 13, 0, 0, DateTimeKind.Utc));
+
+        var twentySixth = new DateOnly(2026, 9, 26);
+        var result = ControllerFor(db, clock).GetMovements(
+            from: twentySixth, to: twentySixth, type: null, itemId: null, performedBy: null,
+            page: 1, pageSize: 25);
+
+        // Someone standing in the warehouse on the 26th asking for the 26th
+        // means their day, which began at 14:00 UTC on the 25th.
+        Assert.Equal(1, ApiResult.Number(result, "TotalCount"));
     }
 
     [Fact]

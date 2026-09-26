@@ -11,10 +11,12 @@ namespace Inventria.Controllers;
 public class DashboardController : ControllerBase
 {
     private readonly InventriaDbContext _context;
+    private readonly WarehouseClock _clock;
 
-    public DashboardController(InventriaDbContext context)
+    public DashboardController(InventriaDbContext context, WarehouseClock clock)
     {
         _context = context;
+        _clock = clock;
     }
 
     [Authorize(Roles = UserRoles.Admin)]
@@ -111,7 +113,11 @@ public class DashboardController : ControllerBase
 
         var lowStockCount = await LowStock.Lines(_context).CountAsync();
 
-        var startOfDay = DateTime.UtcNow.Date;
+        // The warehouse's own midnight, not UTC's. Movements are still stamped
+        // and compared in UTC - this is only the instant that day started, in
+        // the zone configured as Warehouse:TimeZone. Left unconfigured it is
+        // UTC midnight, exactly as before. See WarehouseClock.
+        var startOfDay = _clock.StartOfToday();
 
         var movementsToday = _context.StockMovements.Where(m => m.Timestamp >= startOfDay);
 

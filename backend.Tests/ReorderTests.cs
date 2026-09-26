@@ -1,3 +1,4 @@
+using Inventria;
 using Inventria.Controllers;
 using Inventria.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -17,9 +18,9 @@ namespace Inventria.Tests;
 /// </summary>
 public class ReorderTests
 {
-    private static ReportsController ReportsFor(TestDatabase db) => new(db.Context);
+    private static ReportsController ReportsFor(TestDatabase db) => new(db.Context, WarehouseClock.Utc);
 
-    private static DashboardController DashboardFor(TestDatabase db) => new(db.Context);
+    private static DashboardController DashboardFor(TestDatabase db) => new(db.Context, WarehouseClock.Utc);
 
     private static InventoryController InventoryFor(TestDatabase db) =>
         new(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
