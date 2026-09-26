@@ -60,6 +60,7 @@
 		<a href={resolve('/purchase-orders')} class:active={activePage === 'Purchase Orders'}
 			>Purchase Orders</a
 		>
+		<a href={resolve('/pick-lists')} class:active={activePage === 'Pick Lists'}>Pick Lists</a>
 		<a href={resolve('/reports')} class:active={activePage === 'Reports'}>Reports</a>
 		{#if isAdmin}
 			<a href={resolve('/users')} class:active={activePage === 'Users'}>Users</a>

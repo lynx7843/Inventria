@@ -201,7 +201,13 @@ public class PickListsController : ControllerBase
     [HttpPost("{id}/lines/{lineId}/pick")]
     public IActionResult PickLine(int id, int lineId, [FromBody] PickPickListLineRequest request)
     {
-        var list = _context.PickLists.Include(l => l.Lines).FirstOrDefault(l => l.Id == id);
+        // DetailQuery rather than a plain Include(l => l.Lines): the response
+        // below hands back ListDetail, whose per-line item name, SKU and bin
+        // address are read off those navigation properties. Without them loaded
+        // they serialize as nulls, and a caller that trusts the response it was
+        // just given - rather than going back for a fresh GET - shows "Item #2"
+        // and "Bin #1" for every line from the first pick onwards.
+        var list = DetailQuery().FirstOrDefault(l => l.Id == id);
         if (list == null) return NotFound(new { Message = "Pick list not found." });
 
         if (list.Status != PickListStatus.Open)

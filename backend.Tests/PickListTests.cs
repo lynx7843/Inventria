@@ -113,6 +113,47 @@ public class PickListTests
     }
 
     [Fact]
+    public void Picking_a_line_answers_with_the_item_and_bin_each_line_names()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem(sku: "SKU-7", name: "Industrial Fan");
+        var bin = db.AddBin(zone: "Bulk Storage", aisle: "B3", shelf: "S4");
+        db.AddBalance(item, bin, 20);
+
+        ControllerFor(db).OpenPickList(new OpenPickListRequest
+        {
+            Lines = [new PickListLineRequest { ItemId = item.Id, WarehouseBinId = bin.Id, Quantity = 8 }]
+        });
+        var line = ListWithLines(db).Lines.Single();
+
+        // A context of its own, with nothing already tracked in it. The one the
+        // list was built through has the item and the bin in its change tracker,
+        // so EF fixes up every line's navigation properties there whether the
+        // query asked for them or not - and a controller over that context
+        // answers correctly even when it has not loaded them. A picker's second
+        // request arrives at a fresh context, which is where a response built
+        // from unloaded navigations turns into nulls on the wire.
+        using var fresh = db.NewContext();
+        var controller = new PickListsController(fresh, new StockPickingService(fresh))
+        {
+            ControllerContext = ApiResult.SignedInAs("alice")
+        };
+
+        var result = controller.PickLine(line.PickListId, line.Id, new PickPickListLineRequest { Quantity = 3 });
+
+        Assert.IsType<OkObjectResult>(result);
+
+        var answered = ApiResult.Property(
+            ApiResult.Property(ApiResult.Body(result), "PickList"), "Lines").EnumerateArray().Single();
+
+        Assert.Equal("Industrial Fan", ApiResult.Property(answered, "ItemName").GetString());
+        Assert.Equal("SKU-7", ApiResult.Property(answered, "ItemSku").GetString());
+        Assert.Equal("Bulk Storage", ApiResult.Property(answered, "BinZone").GetString());
+        Assert.Equal("B3", ApiResult.Property(answered, "BinAisle").GetString());
+        Assert.Equal("S4", ApiResult.Property(answered, "BinShelf").GetString());
+    }
+
+    [Fact]
     public void A_list_stays_open_until_every_line_is_fully_picked()
     {
         using var db = new TestDatabase();
