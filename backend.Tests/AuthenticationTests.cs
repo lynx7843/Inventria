@@ -1,3 +1,4 @@
+using Inventria;
 using Inventria.Controllers;
 using Inventria.Models;
 using Microsoft.AspNetCore.Http;
@@ -18,21 +19,38 @@ public class AuthenticationTests
 
     private const string KnownPassword = "correct horse battery staple";
 
-    private static AuthController ControllerFor(TestDatabase db, LoginThrottle? throttle = null)
-    {
-        var configuration = new ConfigurationBuilder()
+    /// <summary>
+    /// Long enough to encrypt TOTP secrets with. Two-factor is off for every
+    /// account in this file, so nothing here exercises it - the key is supplied
+    /// only so the controller can be built the way the app builds it.
+    /// </summary>
+    internal const string TestTotpKey = "test-totp-encryption-key-not-a-real-one";
+
+    internal static IConfiguration TestConfiguration() =>
+        new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Jwt:Key"] = TestSigningKey,
                 // Development serves the API over plain HTTP; the cookie policy
                 // is not what these tests are about.
-                ["Auth:CookieSecure"] = "false"
+                ["Auth:CookieSecure"] = "false",
+                [TotpSecretProtector.ConfigurationKey] = TestTotpKey
             })
             .Build();
 
+    internal static AuthController ControllerFor(
+        TestDatabase db,
+        LoginThrottle? throttle = null,
+        PendingTwoFactorLogins? pending = null,
+        TotpSecretProtector? protector = null,
+        IConfiguration? configuration = null)
+    {
+        configuration ??= TestConfiguration();
         throttle ??= new LoginThrottle(new MemoryCache(new MemoryCacheOptions()));
+        pending ??= new PendingTwoFactorLogins(new MemoryCache(new MemoryCacheOptions()));
+        protector ??= TotpSecretProtector.FromConfiguration(configuration);
 
-        return new AuthController(db.Context, configuration, throttle)
+        return new AuthController(db.Context, configuration, throttle, pending, protector)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

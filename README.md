@@ -16,6 +16,7 @@ The system is connected to a Microsoft SQL Server database for fast, reliable, a
 * **Print** bin labels and pick sheets, barcoded, on any ordinary printer
 * **Categorize** inventory items
 * **Role-based** access for Employee and Admin views
+* **Two-factor** sign-in with any authenticator app, plus single-use recovery codes
 * **Fast** and reliable data access using Microsoft SQL Server
 * **Simple** and user-friendly web UI
 
@@ -155,6 +156,22 @@ dotnet run
 
 Wait for `Now listening on: http://localhost:5240`. The first start takes around
 15 seconds. Stop it with `Ctrl+C`.
+
+> **Two-factor sign-in:** accounts can add an authenticator app from Settings,
+> but only once the server has a key to encrypt the secrets with. Unlike a
+> password, a TOTP secret has to be readable back in order to check a code, so
+> it is encrypted rather than hashed:
+> ```bash
+> dotnet user-secrets set "Auth:TotpEncryptionKey" "$(openssl rand -base64 48)"
+> ```
+> Without it the app runs normally and the Settings panel says two-factor is
+> unavailable rather than offering a button that cannot work. Changing the key
+> later makes every enrolled account fall back to its recovery codes, so keep it
+> with the database backups rather than in them.
+>
+> Each account is given ten single-use recovery codes when it enrols, shown
+> once. They are the only way back in from a lost phone - nothing in the Users
+> screen can clear another account's second factor.
 
 > **Timezone:** figures like the employee dashboard's "received today" and the
 > movements report's date filters need to know where one day ends and the next

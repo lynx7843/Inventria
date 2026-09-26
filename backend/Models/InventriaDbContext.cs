@@ -43,6 +43,7 @@ public class InventriaDbContext : DbContext
     public DbSet<BillOfMaterials> BillsOfMaterials { get; set; }
     public DbSet<BillOfMaterialLine> BillOfMaterialLines { get; set; }
     public DbSet<AuditLog> AuditLogs { get; set; }
+    public DbSet<RecoveryCode> RecoveryCodes { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -202,6 +203,42 @@ public class InventriaDbContext : DbContext
             // extension with room to spare - not a guess at a storage limit,
             // since AvatarStorage is the only thing that ever writes this column.
             user.Property(u => u.AvatarPath).HasMaxLength(255);
+
+            // A version byte, a 12-byte nonce, a 16-byte tag and 20 bytes of
+            // secret, base64'd - 68 characters. The cap is generous rather than
+            // exact so a future format (see TotpSecretProtector.Version) has
+            // room without a migration, but it is a cap: these are never
+            // indexed, but nvarchar(max) for a 68-character column is a row
+            // that is stored off-page for no reason.
+            user.Property(u => u.TotpSecret).HasMaxLength(256);
+            user.Property(u => u.TotpPendingSecret).HasMaxLength(256);
+
+            user.Property(u => u.TotpEnabledAt)
+                .HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+        });
+
+        // Single-use codes for an account whose authenticator app is gone.
+        modelBuilder.Entity<RecoveryCode>(code =>
+        {
+            // Hex SHA-256 is exactly 64 characters.
+            code.Property(c => c.CodeHash).HasMaxLength(64);
+
+            code.Property(c => c.CreatedAt).HasConversion(v => ToUtcForWrite(v), v => AsUtcOnRead(v));
+            code.Property(c => c.UsedAt)
+                .HasConversion(v => ToUtcForWriteNullable(v), v => AsUtcOnReadNullable(v));
+
+            // Every read of this table is "the codes belonging to this account",
+            // during a sign-in that is already waiting on the person typing.
+            code.HasIndex(c => c.UserId);
+
+            // Deleting an account takes its recovery codes with it. Cascade
+            // rather than the restrict used for stock, because unlike a
+            // movement these are worth nothing once the account they open is
+            // gone - and leaving them would block the delete outright.
+            code.HasOne(c => c.User)
+                .WithMany(u => u.RecoveryCodes)
+                .HasForeignKey(c => c.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // A SKU is the code people scan and search by, so duplicates make the
@@ -574,7 +611,21 @@ public class InventriaDbContext : DbContext
     // worth keeping out of a table with wider read access than the Users row
     // it came from - what matters for the audit trail is that it changed, not
     // to what.
-    private static readonly HashSet<string> RedactedProperties = new(StringComparer.Ordinal) { "Password" };
+    //
+    // The same goes for everything two-factor. A TOTP secret is reversible by
+    // design (TotpSecretProtector), so writing the ciphertext into a second
+    // table is one more place the key has to hold; and a recovery code hash in
+    // an audit row is a usable credential to anyone who can read that table,
+    // since - unlike a password - there is no password to also need. What the
+    // trail should say is that someone's second factor changed, and when, which
+    // the row still says without any of this in it.
+    private static readonly HashSet<string> RedactedProperties = new(StringComparer.Ordinal)
+    {
+        "Password",
+        "TotpSecret",
+        "TotpPendingSecret",
+        "CodeHash"
+    };
 
     private (List<AuditLog> ReadyLogs, List<(AuditLog Log, EntityEntry Entry)> PendingAdds) CaptureAudits()
     {

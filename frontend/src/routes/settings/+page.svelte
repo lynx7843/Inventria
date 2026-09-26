@@ -4,6 +4,17 @@
 	import { onMount } from 'svelte';
 	import { requireSession, getUsername, getRole, saveSession, endExpiredSession } from '$lib/auth';
 	import { apiFetch, apiErrorMessage, apiUrl } from '$lib/api';
+	import QrCode from '$lib/components/shared/QrCode.svelte';
+	import {
+		confirmEnrollment,
+		disableTwoFactor,
+		downloadRecoveryCodes,
+		fetchTwoFactorStatus,
+		regenerateRecoveryCodes,
+		startEnrollment,
+		type Enrollment,
+		type TwoFactorStatus
+	} from '$lib/twoFactor';
 
 	// Open to anyone signed in - there's nothing here an Employee shouldn't see
 	// about their own account.
@@ -36,6 +47,116 @@
 	let errorMsg = $state('');
 	let saving = $state(false);
 
+	// --- TWO-FACTOR ---------------------------------------------------------
+	//
+	// Four screens in one panel, because that is what turning this on actually
+	// is: decide, scan, prove it scanned, and write down the way back in. The
+	// step is held here rather than inferred from which fields are filled, so a
+	// half-finished setup cannot be mistaken for a finished one.
+	type TwoFactorStep = 'idle' | 'password' | 'scan' | 'codes';
+
+	let twoFactor: TwoFactorStatus | null = $state(null);
+	let twoFactorStep: TwoFactorStep = $state('idle');
+	let twoFactorPassword = $state('');
+	let twoFactorCode = $state('');
+	let twoFactorError = $state('');
+	let twoFactorBusy = $state(false);
+	let enrollment: Enrollment | null = $state(null);
+	let recoveryCodes: string[] = $state([]);
+
+	// What the password step is being asked for: the same box confirms turning
+	// it on, turning it off, and reissuing codes, and only the button underneath
+	// differs.
+	let passwordPurpose: 'enable' | 'disable' | 'regenerate' = $state('enable');
+
+	// Shown above the codes, because reaching this screen for those two reasons
+	// means something different: one is "you are finished", the other is "the
+	// codes you had are now dead".
+	let codesAreReissued = $state(false);
+
+	async function loadTwoFactor() {
+		try {
+			twoFactor = await fetchTwoFactorStatus();
+		} catch (err) {
+			console.error(err);
+			twoFactorError = err instanceof Error ? err.message : 'Failed to load two-factor settings.';
+		}
+	}
+
+	function openTwoFactorPassword(purpose: 'enable' | 'disable' | 'regenerate') {
+		passwordPurpose = purpose;
+		twoFactorPassword = '';
+		twoFactorCode = '';
+		twoFactorError = '';
+		twoFactorStep = 'password';
+	}
+
+	function closeTwoFactor() {
+		twoFactorStep = 'idle';
+		twoFactorPassword = '';
+		twoFactorCode = '';
+		twoFactorError = '';
+
+		// The codes are dropped from memory with the screen that showed them.
+		// Leaving them in a variable the panel could be reopened onto would turn
+		// "shown once" into "shown whenever".
+		enrollment = null;
+		recoveryCodes = [];
+	}
+
+	async function submitTwoFactorPassword() {
+		twoFactorError = '';
+		twoFactorBusy = true;
+
+		try {
+			if (passwordPurpose === 'enable') {
+				enrollment = await startEnrollment(twoFactorPassword);
+				twoFactorStep = 'scan';
+			} else if (passwordPurpose === 'regenerate') {
+				recoveryCodes = (await regenerateRecoveryCodes(twoFactorPassword)).recoveryCodes;
+				codesAreReissued = true;
+				twoFactorStep = 'codes';
+				await loadTwoFactor();
+			} else {
+				await disableTwoFactor(twoFactorPassword);
+				await loadTwoFactor();
+				closeTwoFactor();
+			}
+		} catch (err) {
+			twoFactorError = err instanceof Error ? err.message : 'Something went wrong.';
+		} finally {
+			twoFactorBusy = false;
+			twoFactorPassword = '';
+		}
+	}
+
+	async function submitTwoFactorCode() {
+		twoFactorError = '';
+		twoFactorBusy = true;
+
+		try {
+			recoveryCodes = (await confirmEnrollment(twoFactorCode)).recoveryCodes;
+			codesAreReissued = false;
+			enrollment = null;
+			twoFactorStep = 'codes';
+			await loadTwoFactor();
+		} catch (err) {
+			twoFactorError = err instanceof Error ? err.message : 'Something went wrong.';
+		} finally {
+			twoFactorBusy = false;
+			twoFactorCode = '';
+		}
+	}
+
+	/** Base32 in groups of four, which is how it gets read into a phone. */
+	function formatSecret(secret: string): string {
+		return (secret.match(/.{1,4}/g) ?? [secret]).join(' ');
+	}
+
+	function formatEnabledAt(iso: string | null): string {
+		return iso ? new Date(iso).toLocaleDateString() : '';
+	}
+
 	let showPasswordForm = $state(false);
 	let currentPassword = $state('');
 	let newPassword = $state('');
@@ -47,6 +168,8 @@
 	onMount(async () => {
 		if (!requireSession()) return;
 		allowed = true;
+
+		loadTwoFactor();
 
 		try {
 			const res = await apiFetch('/api/users/me');
@@ -493,23 +616,239 @@
 							</form>
 						{/if}
 
-						<div class="sec-row static">
+						<div class="sec-row" class:static={!twoFactor?.available}>
 							<div class="sec-icon">
 								<svg
 									width="17"
 									height="17"
 									viewBox="0 0 24 24"
 									fill="none"
-									stroke="#6b7280"
+									stroke={twoFactor?.enabled ? '#0b6b36' : '#6b7280'}
 									stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg
 								>
 							</div>
 							<div class="sec-text">
 								<span class="sec-label">Two-Factor Auth</span>
-								<span class="sec-sub">Add a second step to signing in</span>
+								<span class="sec-sub">
+									{#if twoFactor === null}
+										Loading…
+									{:else if !twoFactor.available}
+										Not configured on this server
+									{:else if twoFactor.enabled}
+										On since {formatEnabledAt(twoFactor.enabledAt)} &middot;
+										{twoFactor.recoveryCodesRemaining} recovery code{twoFactor.recoveryCodesRemaining ===
+										1
+											? ''
+											: 's'} left
+									{:else}
+										A code from your phone, as well as your password
+									{/if}
+								</span>
 							</div>
-							<span class="tag">SOON</span>
+
+							{#if twoFactor === null}
+								<span class="tag">…</span>
+							{:else if !twoFactor.available}
+								<!-- The server has no key to encrypt a TOTP secret with, so
+								     enrolling would have to either store it in the clear or
+								     fail at the last step. Say which rather than showing a
+								     button that cannot work. -->
+								<span class="tag">UNAVAILABLE</span>
+							{:else if twoFactor.enabled}
+								<span class="tag on">ON</span>
+							{:else}
+								<button
+									class="sec-action"
+									type="button"
+									onclick={() => openTwoFactorPassword('enable')}
+									disabled={twoFactorStep !== 'idle'}
+								>
+									Set up
+								</button>
+							{/if}
 						</div>
+
+						{#if twoFactor?.enabled && twoFactorStep === 'idle'}
+							<div class="tfa-manage">
+								<button
+									class="link-action"
+									type="button"
+									onclick={() => openTwoFactorPassword('regenerate')}
+								>
+									New recovery codes
+								</button>
+								<button
+									class="link-action danger"
+									type="button"
+									onclick={() => openTwoFactorPassword('disable')}
+								>
+									Turn off
+								</button>
+							</div>
+						{/if}
+
+						{#if twoFactor?.enabled && twoFactor.recoveryCodesRemaining <= 2 && twoFactorStep === 'idle'}
+							<!-- Running out is not an error yet, but it is the last moment
+							     it can be fixed without already being locked out. -->
+							<p class="tfa-warning">
+								{twoFactor.recoveryCodesRemaining === 0
+									? 'You have no recovery codes left. Without one, a lost phone locks you out of this account.'
+									: 'You are nearly out of recovery codes. Issue a new set while you can still sign in.'}
+							</p>
+						{/if}
+
+						{#if twoFactorStep === 'password'}
+							<form
+								class="password-form"
+								onsubmit={(e) => {
+									e.preventDefault();
+									submitTwoFactorPassword();
+								}}
+							>
+								<p class="tfa-step-text">
+									{#if passwordPurpose === 'enable'}
+										Confirm your password to start setting up your authenticator app.
+									{:else if passwordPurpose === 'regenerate'}
+										Confirm your password. Your current recovery codes will stop working.
+									{:else}
+										Confirm your password to turn off two-factor authentication. Your recovery codes
+										will be deleted.
+									{/if}
+								</p>
+								<div class="field-wrap">
+									<label class="field-label" for="tfaPassword">Current Password</label>
+									<!-- svelte-ignore a11y_autofocus -->
+									<input
+										id="tfaPassword"
+										class="field-input"
+										type="password"
+										autocomplete="current-password"
+										bind:value={twoFactorPassword}
+										autofocus
+									/>
+								</div>
+
+								{#if twoFactorError}
+									<span class="save-error">{twoFactorError}</span>
+								{/if}
+
+								<div class="password-form-actions">
+									<button type="button" class="cancel-btn" onclick={closeTwoFactor}>Cancel</button>
+									<button
+										type="submit"
+										class="save-btn"
+										class:danger={passwordPurpose === 'disable'}
+										disabled={twoFactorBusy || !twoFactorPassword}
+									>
+										{#if twoFactorBusy}
+											Working…
+										{:else if passwordPurpose === 'enable'}
+											Continue
+										{:else if passwordPurpose === 'regenerate'}
+											Issue new codes
+										{:else}
+											Turn off
+										{/if}
+									</button>
+								</div>
+							</form>
+						{/if}
+
+						{#if twoFactorStep === 'scan' && enrollment}
+							<form
+								class="password-form"
+								onsubmit={(e) => {
+									e.preventDefault();
+									submitTwoFactorCode();
+								}}
+							>
+								<p class="tfa-step-text">
+									Scan this with Google Authenticator, 1Password, or any authenticator app, then
+									enter the six digits it shows.
+								</p>
+
+								<div class="tfa-scan">
+									<QrCode
+										value={enrollment.otpAuthUri}
+										size={168}
+										label="Authenticator setup code"
+									/>
+									<div class="tfa-manual">
+										<span class="field-label">Can't scan?</span>
+										<p class="tfa-hint">Enter this key into the app by hand:</p>
+										<code class="tfa-secret">{formatSecret(enrollment.secret)}</code>
+									</div>
+								</div>
+
+								<div class="field-wrap">
+									<label class="field-label" for="tfaCode">Six-digit code</label>
+									<!-- inputmode and the pattern get a numeric keypad on a phone,
+									     which is where the digits are being read from anyway.
+									     one-time-code lets a password manager fill it. -->
+									<!-- svelte-ignore a11y_autofocus -->
+									<input
+										id="tfaCode"
+										class="field-input code-input"
+										type="text"
+										inputmode="numeric"
+										pattern="[0-9]*"
+										maxlength="6"
+										autocomplete="one-time-code"
+										placeholder="000000"
+										bind:value={twoFactorCode}
+										autofocus
+									/>
+								</div>
+
+								{#if twoFactorError}
+									<span class="save-error">{twoFactorError}</span>
+								{/if}
+
+								<div class="password-form-actions">
+									<button type="button" class="cancel-btn" onclick={closeTwoFactor}>Cancel</button>
+									<button
+										type="submit"
+										class="save-btn"
+										disabled={twoFactorBusy || twoFactorCode.length !== 6}
+									>
+										{twoFactorBusy ? 'Checking…' : 'Turn on'}
+									</button>
+								</div>
+							</form>
+						{/if}
+
+						{#if twoFactorStep === 'codes'}
+							<div class="password-form">
+								<p class="tfa-step-text">
+									{#if codesAreReissued}
+										<strong>New recovery codes.</strong> The previous set no longer works.
+									{:else}
+										<strong>Two-factor authentication is on.</strong>
+									{/if}
+									Each code below signs you in once if you lose your phone. This is the only time they
+									are shown.
+								</p>
+
+								<ul class="tfa-codes">
+									{#each recoveryCodes as code (code)}
+										<li>{code}</li>
+									{/each}
+								</ul>
+
+								<div class="password-form-actions">
+									<button
+										type="button"
+										class="cancel-btn"
+										onclick={() => downloadRecoveryCodes(recoveryCodes, fullName)}
+									>
+										Download
+									</button>
+									<button type="button" class="save-btn" onclick={closeTwoFactor}>
+										I've saved these
+									</button>
+								</div>
+							</div>
+						{/if}
 					</div>
 				</div>
 
@@ -712,6 +1051,11 @@
 	}
 	.field-input {
 		width: 100%;
+		/* Without this, width:100% is the content box and the padding and border
+		   are added on top - so every field inside the security panel's dashed
+		   form (this one and the password form beside it) ran a few pixels past
+		   the box it sits in. */
+		box-sizing: border-box;
 		padding: 0.6rem 0.75rem;
 		border: 1.5px solid #cbd5e1;
 		border-radius: 6px;
@@ -882,6 +1226,148 @@
 		border-radius: 4px;
 		padding: 0.15rem 0.4rem;
 		flex-shrink: 0;
+	}
+	.tag.on {
+		color: #166534;
+		background: #dcfce7;
+		border-color: #4ade80;
+	}
+
+	/* --- Two-factor --- */
+	.sec-action {
+		padding: 0.4rem 0.9rem;
+		background: white;
+		color: #0b6b36;
+		border: 1.5px solid #cbd5e1;
+		border-radius: 6px;
+		font-size: 0.78rem;
+		font-weight: 600;
+		font-family: inherit;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+	.sec-action:hover:not(:disabled) {
+		border-color: #0b6b36;
+		background: #f0fdf4;
+	}
+	.sec-action:disabled {
+		color: #94a3b8;
+		cursor: not-allowed;
+	}
+	.tfa-manage {
+		display: flex;
+		gap: 1rem;
+		padding: 0 0.2rem;
+		margin-top: -0.2rem;
+	}
+	.link-action {
+		background: none;
+		border: none;
+		padding: 0;
+		font-family: inherit;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #0b6b36;
+		cursor: pointer;
+	}
+	.link-action:hover {
+		text-decoration: underline;
+	}
+	.link-action.danger {
+		color: #b91c1c;
+	}
+	.tfa-warning {
+		margin: 0;
+		padding: 0.6rem 0.75rem;
+		background: #fef3c7;
+		border: 1px solid #fcd34d;
+		border-radius: 6px;
+		font-size: 0.75rem;
+		color: #92400e;
+	}
+	.tfa-step-text {
+		margin: 0;
+		font-size: 0.8rem;
+		color: #475569;
+		line-height: 1.5;
+	}
+	/* Stacked, not side by side. The security panel is the narrow column of a
+	   two-column page, and putting a 168px QR next to the fallback key left the
+	   key three characters wide - which is the one thing on this screen somebody
+	   has to read accurately, character by character, into a phone. */
+	.tfa-scan {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.8rem;
+	}
+	.tfa-manual {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		width: 100%;
+		min-width: 0;
+	}
+	.tfa-hint {
+		margin: 0;
+		font-size: 0.75rem;
+		color: #64748b;
+	}
+	.tfa-secret {
+		font-family: monospace;
+		font-size: 0.78rem;
+		/* Grouped by eye rather than run together: this is read aloud or typed
+		   one character at a time, and base32 in an unbroken 32-character line
+		   is where people lose their place. */
+		letter-spacing: 2px;
+		word-spacing: 2px;
+		line-height: 1.6;
+		text-align: center;
+		color: #0f172a;
+		background: #f1f5f9;
+		border: 1px solid #e2e8f0;
+		border-radius: 6px;
+		padding: 0.5rem 0.6rem;
+		/* Base32 in one unbroken run is wider than this column; wrapping it
+		   beats a scrollbar on something being copied by eye. */
+		overflow-wrap: anywhere;
+	}
+	.code-input {
+		font-family: monospace;
+		font-size: 1.1rem;
+		letter-spacing: 0.4em;
+		text-align: center;
+	}
+	/* One per line. Two columns fits more on screen, but in the narrow security
+	   panel it wrapped each code across two lines - and a code broken mid-group
+	   is a code somebody transcribes wrongly. */
+	.tfa-codes {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0.35rem;
+		list-style: none;
+		margin: 0;
+		padding: 0.8rem;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		font-family: monospace;
+		font-size: 0.8rem;
+		color: #0f172a;
+	}
+	.save-btn.danger {
+		background: #b91c1c;
+	}
+	.save-btn.danger:hover {
+		background: #991b1b;
+	}
+
+	@media print {
+		/* Printing the page is one of the two ways someone saves these, and the
+		   panels around them are not worth the paper. */
+		.tfa-codes {
+			font-size: 11pt;
+		}
 	}
 
 	.notif-list {

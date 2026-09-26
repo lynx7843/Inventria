@@ -138,6 +138,19 @@ builder.Services.AddAuthorization();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<LoginThrottle>();
 
+// Holds a sign-in between its password step and its authenticator-app step.
+// Singleton over the same IMemoryCache as the throttle above, for the same
+// reasons and with the same per-process limit - see PendingTwoFactorLogins.
+builder.Services.AddSingleton<PendingTwoFactorLogins>();
+
+// Encrypts TOTP secrets at rest. Unlike Jwt:Key this is allowed to be absent:
+// every deployment that predates two-factor has no key configured and nothing
+// enrolled, and refusing to start would take it offline over a feature it is
+// not using. The enrolment endpoint is what refuses instead - see
+// TotpSecretProtector.
+var totpProtector = TotpSecretProtector.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(totpProtector);
+
 builder.Services.AddRateLimiter(options =>
 {
     options.OnRejected = async (context, cancellationToken) =>
@@ -264,6 +277,14 @@ var app = builder.Build();
 // matters here specifically because POST /api/Auth/login's body is a
 // plaintext password and a log file is exactly the wrong place for it.
 app.UseSerilogRequestLogging();
+
+if (!totpProtector.IsConfigured)
+{
+    app.Logger.LogWarning(
+        "{Key} is not set, so accounts cannot turn on two-factor authentication. " +
+        "Set it out of source control to enable it, e.g. Auth__TotpEncryptionKey=$(openssl rand -base64 48).",
+        TotpSecretProtector.ConfigurationKey);
+}
 
 // 4. Seed the first Admin account.
 // Registration requires an existing Admin token, so a brand new database would
