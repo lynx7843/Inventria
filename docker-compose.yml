@@ -44,6 +44,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: Server=db;Database=WarehouseDb;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Inventria!Dev2026};TrustServerCertificate=True;
       Jwt__Key: ${JWT_KEY:-local-docker-compose-dev-key-not-for-production-use-32bytes}
+      # Encrypts authenticator-app secrets. Blank means accounts cannot turn
+      # two-factor on - see backend/TotpSecretProtector.cs.
+      Auth__TotpEncryptionKey: ${TOTP_ENCRYPTION_KEY:-}
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:-}
       Seed__EmployeePassword: ${SEED_EMPLOYEE_PASSWORD:-}
       Cors__AllowedOrigins__0: http://localhost:5173
