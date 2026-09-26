@@ -12,6 +12,8 @@ The system is connected to a Microsoft SQL Server database for fast, reliable, a
 * **Delete** products
 * **Track** stock levels per warehouse bin
 * **Move** stock: receive, pick, and relocate
+* **Batch** picks into one walking route with pick lists
+* **Print** bin labels and pick sheets, barcoded, on any ordinary printer
 * **Categorize** inventory items
 * **Role-based** access for Employee and Admin views
 * **Fast** and reliable data access using Microsoft SQL Server

@@ -4,10 +4,12 @@
 	import InputField from '$lib/components/shared/InputField.svelte';
 	import Button from '$lib/components/shared/Button.svelte';
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
+	import type { ResolvedPathname } from '$app/types';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
 	import { focusId, isTypingInField } from '$lib/keyboard';
-	import type { WarehouseBin } from '$lib/inventory';
+	import { binLabel, type WarehouseBin } from '$lib/inventory';
 
 	// Gates the markup below. No role list: bins are part of the warehouse map
 	// that Admins and Employees both maintain, so this only requires a session.
@@ -150,6 +152,21 @@
 		focusId('add-bin-trigger');
 	}
 
+	/**
+	 * Where the printable shelf labels for these bins live - see
+	 * /print/bin-labels. Called with no argument for the whole warehouse, or with
+	 * one bin when a single label needs replacing.
+	 */
+	function labelSheetHref(binId?: number): ResolvedPathname {
+		// The query string goes inside resolve() rather than being appended to its
+		// result: resolve accepts a pathname with a search on it, and keeping it
+		// there is what leaves the return type a ResolvedPathname instead of a
+		// bare string - see PrintSheet's backHref.
+		return binId === undefined
+			? resolve('/print/bin-labels')
+			: resolve(`/print/bin-labels?bins=${binId}`);
+	}
+
 	// "N" opens the create form - guarded by isTypingInField (see
 	// employee/+page.svelte) so it never hijacks a letter meant for a field.
 	// Escape closes whichever form is open and is deliberately NOT guarded by
@@ -185,11 +202,17 @@
 					Define the storage locations stock can be received into, picked from and moved between.
 				</p>
 			</div>
-			{#if !showForm}
-				<button id="add-bin-trigger" class="btn-solid" onclick={openNewForm}>
-					+ Add New Bin <kbd>N</kbd>
-				</button>
-			{/if}
+			<div class="header-actions">
+				<!-- A link rather than a button: the label sheet is a page of its own,
+				     so it can be opened in a second tab and printed from there without
+				     losing this one. -->
+				<a class="btn-outline" href={labelSheetHref()}>🖨️ Print Labels</a>
+				{#if !showForm}
+					<button id="add-bin-trigger" class="btn-solid" onclick={openNewForm}>
+						+ Add New Bin <kbd>N</kbd>
+					</button>
+				{/if}
+			</div>
 		</div>
 
 		{#if errorMsg}
@@ -265,11 +288,16 @@
 						{#each bins as bin (bin.id)}
 							<tr>
 								<td class="text-muted">#{bin.id}</td>
-								<td><span class="badge gray">{bin.zone}-{bin.aisle}-{bin.shelf}</span></td>
+								<td><span class="badge gray">{binLabel(bin)}</span></td>
 								<td><strong>{bin.zone}</strong></td>
 								<td>{bin.aisle}</td>
 								<td>{bin.shelf}</td>
 								<td class="text-right action-btns">
+									<a
+										class="btn-icon"
+										href={labelSheetHref(bin.id)}
+										aria-label="Print the label for bin {binLabel(bin)}">🖨️</a
+									>
 									<button class="btn-icon edit" onclick={() => openEditForm(bin)}>✏️</button>
 									<button class="btn-icon delete" onclick={() => deleteBin(bin.id)}>🗑️</button>
 								</td>
@@ -327,6 +355,12 @@
 		font-weight: 700;
 		text-align: center;
 	}
+	.header-actions {
+		display: flex;
+		gap: 0.75rem;
+		align-items: center;
+		flex-shrink: 0;
+	}
 	.btn-outline {
 		background: white;
 		color: #475569;
@@ -336,6 +370,10 @@
 		font-weight: 600;
 		cursor: pointer;
 		transition: background 0.2s;
+		/* Shared with the anchor above, which needs these two to sit level with
+		   the button beside it. */
+		text-decoration: none;
+		display: inline-block;
 	}
 	.btn-outline:hover {
 		background: #f1f5f9;
@@ -432,6 +470,8 @@
 		opacity: 0.6;
 		transition: opacity 0.2s;
 		padding: 0.25rem;
+		text-decoration: none;
+		line-height: 1;
 	}
 	.btn-icon:hover {
 		opacity: 1;
