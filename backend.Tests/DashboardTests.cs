@@ -1,3 +1,4 @@
+using Inventria;
 using Inventria.Controllers;
 using Inventria.Models;
 
@@ -9,7 +10,8 @@ namespace Inventria.Tests;
 /// </summary>
 public class DashboardTests
 {
-    private static DashboardController ControllerFor(TestDatabase db) => new(db.Context);
+    private static DashboardController ControllerFor(TestDatabase db, WarehouseClock? clock = null) =>
+        new(db.Context, clock ?? WarehouseClock.Utc);
 
     private static InventoryController InventoryFor(TestDatabase db) =>
         new(db.Context, new StockReceivingService(db.Context), new StockPickingService(db.Context)) { ControllerContext = ApiResult.SignedInAs("alice") };
@@ -98,6 +100,84 @@ public class DashboardTests
         var result = await ControllerFor(db).GetEmployeeStats();
 
         Assert.Equal(0, ApiResult.Number(result, "ReceivedToday"));
+    }
+
+    /// <summary>A clock stopped at <paramref name="utcNow"/>, for asking what "today" is.</summary>
+    private sealed class FrozenTime(DateTime utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(utcNow, TimeSpan.Zero);
+    }
+
+    private static void AddMovement(TestDatabase db, Item item, WarehouseBin bin, string type, int quantity, DateTime utcTimestamp)
+    {
+        db.Context.StockMovements.Add(new StockMovement
+        {
+            ItemId = item.Id,
+            WarehouseBinId = bin.Id,
+            TransactionType = type,
+            QuantityChanged = quantity,
+            Timestamp = utcTimestamp,
+            PerformedBy = "alice"
+        });
+        db.Context.SaveChanges();
+    }
+
+    [Fact]
+    public async Task Today_is_the_warehouses_own_day_not_the_utc_one()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+
+        // Ten hours ahead of UTC - Sydney's offset outside daylight saving, as
+        // a fixed zone so the test does not depend on a tzdata release. It is
+        // 08:00 on the 26th in the warehouse while UTC is still on the 25th.
+        var sydney = TimeZoneInfo.CreateCustomTimeZone(
+            "Test/UtcPlus10", TimeSpan.FromHours(10), "UTC+10", "UTC+10");
+        var now = new DateTime(2026, 9, 25, 22, 0, 0, DateTimeKind.Utc);
+        var clock = new WarehouseClock(sydney, new FrozenTime(now));
+
+        // 01:00 on the 26th on the warehouse floor. Under a UTC day boundary
+        // this was filed as yesterday's work - the whole complaint.
+        AddMovement(db, item, bin, "RECEIVE", 70, new DateTime(2026, 9, 25, 15, 0, 0, DateTimeKind.Utc));
+
+        // 23:00 on the 25th on the floor: genuinely yesterday, even though UTC
+        // still calls it today. Counting it would just move the error an hour.
+        AddMovement(db, item, bin, "RECEIVE", 5, new DateTime(2026, 9, 25, 13, 0, 0, DateTimeKind.Utc));
+
+        var result = await ControllerFor(db, clock).GetEmployeeStats();
+
+        Assert.Equal(70, ApiResult.Number(result, "ReceivedToday"));
+    }
+
+    [Fact]
+    public async Task A_warehouse_behind_utc_does_not_count_tomorrows_work_yet()
+    {
+        using var db = new TestDatabase();
+        var item = db.AddItem();
+        var bin = db.AddBin();
+
+        // The other direction: Los Angeles in winter, where UTC has already
+        // rolled over to a day the warehouse has not reached.
+        var losAngeles = TimeZoneInfo.CreateCustomTimeZone(
+            "Test/UtcMinus8", TimeSpan.FromHours(-8), "UTC-8", "UTC-8");
+        var now = new DateTime(2026, 1, 15, 2, 0, 0, DateTimeKind.Utc);
+        var clock = new WarehouseClock(losAngeles, new FrozenTime(now));
+
+        // Midday on the 14th locally - squarely inside the warehouse's day, but
+        // before UTC's, which did not start until 16:00 local. A UTC boundary
+        // throws away the whole day shift here.
+        AddMovement(db, item, bin, "RECEIVE", 40, new DateTime(2026, 1, 14, 20, 0, 0, DateTimeKind.Utc));
+
+        // 18:00 on the 14th locally: today by either clock.
+        AddMovement(db, item, bin, "RECEIVE", 6, new DateTime(2026, 1, 15, 2, 0, 0, DateTimeKind.Utc));
+
+        // 22:00 on the 13th locally: yesterday by either clock.
+        AddMovement(db, item, bin, "RECEIVE", 9, new DateTime(2026, 1, 14, 6, 0, 0, DateTimeKind.Utc));
+
+        var result = await ControllerFor(db, clock).GetEmployeeStats();
+
+        Assert.Equal(46, ApiResult.Number(result, "ReceivedToday"));
     }
 
     [Fact]

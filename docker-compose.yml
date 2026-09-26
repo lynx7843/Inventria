@@ -47,6 +47,9 @@ services:
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:-}
       Seed__EmployeePassword: ${SEED_EMPLOYEE_PASSWORD:-}
       Cors__AllowedOrigins__0: http://localhost:5173
+      # Which timezone the warehouse keeps its days in - only affects where
+      # "today" starts and ends, never what gets stored. Blank means UTC.
+      Warehouse__TimeZone: ${WAREHOUSE_TIMEZONE:-}
     ports:
       # Published on the same port the README and frontend/.env.example
       # already assume (PUBLIC_API_BASE_URL=http://localhost:5240).

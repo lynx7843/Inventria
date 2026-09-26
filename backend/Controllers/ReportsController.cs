@@ -15,10 +15,12 @@ namespace Inventria.Controllers;
 public class ReportsController : ControllerBase
 {
     private readonly InventriaDbContext _context;
+    private readonly WarehouseClock _clock;
 
-    public ReportsController(InventriaDbContext context)
+    public ReportsController(InventriaDbContext context, WarehouseClock clock)
     {
         _context = context;
+        _clock = clock;
     }
 
     // Same ceiling as InventoryController.GetAllItems, for the same reason: a
@@ -110,8 +112,8 @@ public class ReportsController : ControllerBase
 
     [HttpGet("movements")]
     public IActionResult GetMovements(
-        [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
         [FromQuery] string? type,
         [FromQuery] int? itemId,
         [FromQuery] string? performedBy,
@@ -122,12 +124,20 @@ public class ReportsController : ControllerBase
 
         var query = _context.StockMovements.AsQueryable();
 
-        // `from`/`to` arrive with no offset, the same as every other DateTime
-        // this app reads from a query string, and Timestamp's value converter
-        // already treats an unspecified Kind as UTC - so no adjustment is
-        // needed here to compare on the same clock the column is written with.
-        if (from.HasValue) query = query.Where(m => m.Timestamp >= from.Value);
-        if (to.HasValue) query = query.Where(m => m.Timestamp <= to.Value);
+        // Calendar dates, not instants - which is what the date pickers that
+        // send them have always meant, and now what the type says. Each is
+        // turned into the UTC instant that day starts and ends in the
+        // warehouse's own zone (Warehouse:TimeZone), so the range a person
+        // picks is the range of their days rather than of UTC's. See
+        // WarehouseClock.
+        //
+        // `to` is compared with < against the start of the following day. It
+        // used to be <= against the date itself, which - since a bare date
+        // parses as its midnight - excluded all but the first instant of the
+        // last day someone asked for: choosing today as the end of a range
+        // reliably returned nothing from today.
+        if (from.HasValue) query = query.Where(m => m.Timestamp >= _clock.StartOfDay(from.Value));
+        if (to.HasValue) query = query.Where(m => m.Timestamp < _clock.EndOfDay(to.Value));
 
         // The stored values are the fixed set "RECEIVE"/"PICK"/"RELOCATE", so
         // this is an exact match once case is normalized, not a search.
