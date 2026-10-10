@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Inventria.SqlServerTests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7ea7b26bf8e2e6ba4aed8f0a4929d1457b450f12")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e28a5d776f21fcb2aa0051aea01ae1d8ee9ec927")]
 [assembly: System.Reflection.AssemblyProductAttribute("Inventria.SqlServerTests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Inventria.SqlServerTests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
