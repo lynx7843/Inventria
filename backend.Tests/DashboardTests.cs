@@ -1,6 +1,7 @@
 using Inventria;
 using Inventria.Controllers;
 using Inventria.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Inventria.Tests;
 
@@ -413,5 +414,48 @@ public class DashboardTests
         Assert.Equal(2, distribution.Count);
         Assert.Equal(2, ApiResult.Property(
             distribution.Single(d => ApiResult.Property(d, "Category").GetString() == "Tools"), "Count").GetInt32());
+    }
+
+    // --- STOCK BY CATEGORY (both dashboards) -----------------------------
+
+    private static List<(string Category, int Units)> StockByCategory(IActionResult result) =>
+        ApiResult.Property(ApiResult.Body(result), "StockByCategory").EnumerateArray()
+            .Select(c => (ApiResult.Property(c, "Category").GetString()!, ApiResult.Property(c, "Units").GetInt32()))
+            .ToList();
+
+    [Fact]
+    public async Task Stock_by_category_sums_units_on_hand_including_lots_largest_first()
+    {
+        using var db = new TestDatabase();
+        var wrench = db.AddItem("SKU-1", "Wrench", "Tools");
+        var hammer = db.AddItem("SKU-2", "Hammer", "Tools");
+        var milk = db.AddItem("SKU-3", "Milk", "Dairy", tracksLots: true);
+        var shelf1 = db.AddBin(shelf: "S1");
+        var shelf2 = db.AddBin(shelf: "S2");
+
+        db.AddBalance(wrench, shelf1, 12);
+        db.AddBalance(wrench, shelf2, 8);
+        db.AddBalance(hammer, shelf1, 5);
+        db.AddLotBalance(milk, shelf1, db.AddLot(milk, "LOT-A"), 30);
+        db.AddLotBalance(milk, shelf2, db.AddLot(milk, "LOT-B"), 10);
+
+        var result = await ControllerFor(db).GetAdminStats();
+
+        Assert.Equal([("Dairy", 40), ("Tools", 25)], StockByCategory(result));
+    }
+
+    [Fact]
+    public async Task Stock_by_category_leaves_out_categories_with_nothing_on_hand()
+    {
+        using var db = new TestDatabase();
+        var wrench = db.AddItem("SKU-1", "Wrench", "Tools");
+        db.AddItem("SKU-2", "Cable", "Electronics");
+        var bin = db.AddBin();
+        db.AddBalance(wrench, bin, 7);
+        db.AddBalance(db.AddItem("SKU-3", "Fuse", "Electrical"), bin, 0);
+
+        var result = await ControllerFor(db).GetEmployeeStats();
+
+        Assert.Equal([("Tools", 7)], StockByCategory(result));
     }
 }

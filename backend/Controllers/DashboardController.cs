@@ -63,6 +63,8 @@ public class DashboardController : ControllerBase
         // Calculate total items to determine percentages for the frontend
         var totalItems = distribution.Sum(d => d.Count);
 
+        var stockByCategory = await StockByCategory();
+
         var lowStockCount = await LowStock.Lines(_context).CountAsync();
 
         // 6. Recent System Activity (Last 5 transactions)
@@ -100,6 +102,7 @@ public class DashboardController : ControllerBase
             LowStockCount = lowStockCount,
             Distribution = distribution,
             TotalUniqueItems = totalItems,
+            StockByCategory = stockByCategory,
             RecentActivity = recentActivity
         });
     }
@@ -129,13 +132,47 @@ public class DashboardController : ControllerBase
             .Where(m => m.TransactionType == "PICK")
             .SumAsync(m => (int?)-m.QuantityChanged) ?? 0;
 
+        var stockByCategory = await StockByCategory();
+
         return Ok(new
         {
             UnitsOnHand = unitsOnHand,
             SkusTracked = skusTracked,
             LowStockCount = lowStockCount,
             ReceivedToday = receivedToday,
-            PickedToday = pickedToday
+            PickedToday = pickedToday,
+            StockByCategory = stockByCategory
         });
+    }
+
+    public record CategoryStock(string Category, int Units);
+
+    // Units on the shelves per category, for the pie on both dashboards. The same
+    // two balance tables the stock totals add up, so the slices always sum to the
+    // "units on hand" figure beside them - lot-tracked items keep their stock in
+    // InventoryLotBalances only, and leaving that table out would quietly shrink
+    // any category that tracks lots. Categories with nothing on hand are dropped:
+    // a zero slice has no area to draw.
+    private async Task<List<CategoryStock>> StockByCategory()
+    {
+        var binned = await _context.InventoryBalances
+            .Join(_context.Items, b => b.ItemId, i => i.Id, (b, i) => new { i.Category, b.Quantity })
+            .GroupBy(x => x.Category)
+            .Select(g => new { Category = g.Key, Units = g.Sum(x => x.Quantity) })
+            .ToListAsync();
+
+        var lotted = await _context.InventoryLotBalances
+            .Join(_context.Items, b => b.ItemId, i => i.Id, (b, i) => new { i.Category, b.Quantity })
+            .GroupBy(x => x.Category)
+            .Select(g => new { Category = g.Key, Units = g.Sum(x => x.Quantity) })
+            .ToListAsync();
+
+        return binned.Concat(lotted)
+            .GroupBy(x => x.Category)
+            .Select(g => new CategoryStock(g.Key, g.Sum(x => x.Units)))
+            .Where(c => c.Units > 0)
+            .OrderByDescending(c => c.Units)
+            .ThenBy(c => c.Category)
+            .ToList();
     }
 }

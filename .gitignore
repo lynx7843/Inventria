@@ -6,3 +6,10 @@ TestResults/
 
 # docker-compose secret overrides (see .env.example)
 .env
+
+# .NET build output, for every project. backend/ and backend.Tests/ carry their
+# own copies of these rules, but backend.SqlServerTests/ had none and its whole
+# bin/ and obj/ ended up committed - rebuilt on every `dotnet build`, so every
+# build showed up as changes to commit.
+[Bb]in/
+[Oo]bj/
