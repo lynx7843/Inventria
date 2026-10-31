@@ -458,4 +458,60 @@ public class DashboardTests
 
         Assert.Equal([("Tools", 7)], StockByCategory(result));
     }
+
+    // --- STOCK HISTORY (both dashboards) ---------------------------------
+
+    private static List<int> LevelsFor(IActionResult result, string sku) =>
+        ApiResult.Property(
+                ApiResult.Property(ApiResult.Body(result), "Series").EnumerateArray()
+                    .Single(s => ApiResult.Property(s, "Sku").GetString() == sku),
+                "Levels")
+            .EnumerateArray().Select(l => l.GetInt32()).ToList();
+
+    [Fact]
+    public async Task Stock_history_rebuilds_each_days_closing_level_from_todays_balance()
+    {
+        using var db = new TestDatabase();
+        var now = new DateTime(2026, 10, 31, 12, 0, 0, DateTimeKind.Utc);
+        var clock = new WarehouseClock(TimeZoneInfo.Utc, new FrozenTime(now));
+        var item = db.AddItem("SKU-1");
+        var bin = db.AddBin(shelf: "S1");
+        var other = db.AddBin(shelf: "S2");
+
+        // 50 in on the 26th, 20 out on the 29th, 10 out this morning: 20 left.
+        AddMovement(db, item, bin, "RECEIVE", 50, new DateTime(2026, 10, 26, 9, 0, 0, DateTimeKind.Utc));
+        AddMovement(db, item, bin, "PICK", -20, new DateTime(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc));
+        // A shuffle between shelves on the 30th - not a change in how many there are.
+        AddMovement(db, item, bin, "RELOCATE", -5, new DateTime(2026, 10, 30, 9, 0, 0, DateTimeKind.Utc));
+        AddMovement(db, item, other, "RELOCATE", 5, new DateTime(2026, 10, 30, 9, 0, 0, DateTimeKind.Utc));
+        AddMovement(db, item, bin, "PICK", -10, new DateTime(2026, 10, 31, 8, 0, 0, DateTimeKind.Utc));
+        db.AddBalance(item, bin, 15);
+        db.AddBalance(item, other, 5);
+
+        var result = await ControllerFor(db, clock).GetStockHistory(days: 7);
+        var dates = ApiResult.Property(ApiResult.Body(result), "Dates").EnumerateArray()
+            .Select(d => d.GetString()).ToList();
+
+        Assert.Equal("2026-10-25", dates.First());
+        Assert.Equal("2026-10-31", dates.Last());
+        //            25  26  27  28  29  30  31
+        Assert.Equal([0, 50, 50, 50, 30, 30, 20], LevelsFor(result, "SKU-1"));
+    }
+
+    [Fact]
+    public async Task Stock_history_covers_every_live_item_and_clamps_the_window()
+    {
+        using var db = new TestDatabase();
+        db.AddItem("SKU-1");
+        db.AddItem("SKU-2", "Hammer");
+        db.AddItem("SKU-3", "Old Hammer", isArchived: true);
+
+        var result = await ControllerFor(db).GetStockHistory(days: 1);
+        var body = ApiResult.Body(result);
+
+        Assert.Equal(7, ApiResult.Property(body, "Dates").GetArrayLength());
+        Assert.Equal(["SKU-1", "SKU-2"], ApiResult.Property(body, "Series").EnumerateArray()
+            .Select(s => ApiResult.Property(s, "Sku").GetString()).ToList());
+        Assert.Equal([0, 0, 0, 0, 0, 0, 0], LevelsFor(result, "SKU-2"));
+    }
 }

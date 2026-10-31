@@ -145,6 +145,67 @@ public class DashboardController : ControllerBase
         });
     }
 
+    private const int MinHistoryDays = 7;
+    private const int MaxHistoryDays = 365;
+
+    // Every catalogue item's stock level at the close of each of the last `days`
+    // warehouse days, for the line chart on both dashboards. The last point is
+    // today, and is the level right now.
+    //
+    // Levels are worked backwards from what is on the shelves today: the level
+    // at the end of a day is today's balance minus every movement since. That
+    // reads only the movements inside the window rather than every one ever
+    // logged, and it ends exactly on the balance the rest of the dashboard
+    // shows. RELOCATE legs cancel per item, so moving stock between bins - or
+    // between warehouses, once the receiving leg lands - is not a change in
+    // how much of it there is.
+    [HttpGet("stock-history")]
+    public async Task<IActionResult> GetStockHistory([FromQuery] int days = 30)
+    {
+        days = Math.Clamp(days, MinHistoryDays, MaxHistoryDays);
+
+        var today = _clock.Today();
+        var dates = Enumerable.Range(0, days)
+            .Select(offset => today.AddDays(offset - days + 1))
+            .ToList();
+
+        // Archived items have left the catalogue; a line for each would be a
+        // flat history of something nobody can receive or pick any more.
+        var items = await _context.Items
+            .Where(i => !i.IsArchived)
+            .OrderBy(i => i.Id)
+            .Select(i => new
+            {
+                i.Id,
+                i.Sku,
+                i.Name,
+                OnHand = (_context.InventoryBalances.Where(b => b.ItemId == i.Id).Sum(b => (int?)b.Quantity) ?? 0)
+                    + (_context.InventoryLotBalances.Where(b => b.ItemId == i.Id).Sum(b => (int?)b.Quantity) ?? 0)
+            })
+            .ToListAsync();
+
+        var windowStart = _clock.EndOfDay(dates[0]);
+        var movements = await _context.StockMovements
+            .Where(m => m.Timestamp >= windowStart && m.QuantityChanged != 0)
+            .Select(m => new { m.ItemId, m.Timestamp, m.QuantityChanged })
+            .ToListAsync();
+
+        var movementsByItem = movements.ToLookup(m => m.ItemId);
+        var dayEnds = dates.Select(_clock.EndOfDay).ToList();
+
+        var series = items.Select(item =>
+        {
+            var moves = movementsByItem[item.Id];
+            var levels = dayEnds
+                .Select(end => item.OnHand - moves.Where(m => m.Timestamp >= end).Sum(m => m.QuantityChanged))
+                .ToList();
+
+            return new { ItemId = item.Id, item.Sku, item.Name, Levels = levels };
+        });
+
+        return Ok(new { Dates = dates, Series = series });
+    }
+
     public record CategoryStock(string Category, int Units);
 
     // Units on the shelves per category, for the pie on both dashboards. The same
