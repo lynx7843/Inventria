@@ -5,6 +5,7 @@
 	import PickStockForm from '$lib/components/employee/PickStockForm.svelte';
 	import RelocateStockForm from '$lib/components/employee/RelocateStockForm.svelte';
 	import PieChart from '$lib/components/shared/PieChart.svelte';
+	import StockHistoryChart from '$lib/components/shared/StockHistoryChart.svelte';
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
@@ -138,8 +139,8 @@
          and delivered nothing was worse than no button. -->
 		</div>
 
-		<!-- Two equal columns, so the pie takes the left half and the right half is
-         held open for the chart that goes beside it. -->
+		<!-- Two equal columns: where the stock is now on the left, how each item
+         got there on the right. -->
 		<div class="chart-row">
 			<PieChart
 				title="Stock on Hand by Category"
@@ -147,6 +148,7 @@
 				loading={isLoading}
 				emptyText="No stock on hand yet."
 			/>
+			<StockHistoryChart />
 		</div>
 
 		<!-- Every figure here is one the database can answer. The low-stock count is

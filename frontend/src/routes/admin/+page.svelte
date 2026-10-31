@@ -2,6 +2,7 @@
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import PieChart from '$lib/components/shared/PieChart.svelte';
+	import StockHistoryChart from '$lib/components/shared/StockHistoryChart.svelte';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
@@ -126,8 +127,8 @@
 	<Header />
 
 	<main class="dashboard-content">
-		<!-- Two equal columns, so the pie takes the left half and the right half is
-         held open for the chart that goes beside it. -->
+		<!-- Two equal columns: where the stock is now on the left, how each item
+         got there on the right. -->
 		<div class="chart-row">
 			<PieChart
 				title="Stock on Hand by Category"
@@ -135,6 +136,7 @@
 				loading={isLoading}
 				emptyText="No stock on hand yet."
 			/>
+			<StockHistoryChart />
 		</div>
 
 		<div class="stats-grid">
