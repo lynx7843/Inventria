@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
+	import PieChart from '$lib/components/shared/PieChart.svelte';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
@@ -13,7 +14,7 @@
 	// The shapes GET /api/dashboard/admin and GET /api/users answer with. Spelled
 	// out because an untyped $state([]) infers never[], which makes every field
 	// read off a row an error.
-	type CategoryCount = { category: string; count: number };
+	type CategoryStock = { category: string; units: number };
 
 	type ActivityLog = {
 		transactionType: string;
@@ -31,16 +32,14 @@
 		totalStockQuantity: number;
 		monthlyThroughput: number;
 		lowStockCount: number;
-		distribution: CategoryCount[];
-		totalUniqueItems: number;
+		stockByCategory: CategoryStock[];
 		recentActivity: ActivityLog[];
 	} = $state({
 		totalUsers: 0,
 		totalStockQuantity: 0,
 		monthlyThroughput: 0,
 		lowStockCount: 0,
-		distribution: [],
-		totalUniqueItems: 0,
+		stockByCategory: [],
 		recentActivity: []
 	});
 
@@ -127,6 +126,17 @@
 	<Header />
 
 	<main class="dashboard-content">
+		<!-- Two equal columns, so the pie takes the left half and the right half is
+         held open for the chart that goes beside it. -->
+		<div class="chart-row">
+			<PieChart
+				title="Stock on Hand by Category"
+				slices={stats.stockByCategory.map((c) => ({ label: c.category, value: c.units }))}
+				loading={isLoading}
+				emptyText="No stock on hand yet."
+			/>
+		</div>
+
 		<div class="stats-grid">
 			<!-- The bar under this figure was pinned to 100% - it was a full bar whatever
          the number above it said, because there is no capacity recorded anywhere
@@ -163,60 +173,42 @@
 			</div>
 		</div>
 
-		<div class="middle-grid">
-			<div class="panel">
-				<h3>Inventory Categories</h3>
-				<div class="chart-placeholder">
-					<div class="donut">{stats.totalUniqueItems}<br />SKUs</div>
-					<div class="legend">
-						{#if stats.distribution.length === 0}
-							<p>No categories found.</p>
-						{/if}
-						{#each stats.distribution as item (item.category)}
-							<p>
-								{item.category}
-								<strong>{Math.round((item.count / stats.totalUniqueItems) * 100)}%</strong>
-							</p>
-						{/each}
-					</div>
-				</div>
-			</div>
-
-			<div class="panel">
-				<h3>System Activity</h3>
-				<ul class="activity-list">
-					{#if stats.recentActivity.length === 0}
-						<li>No recent activity to display.</li>
-					{/if}
-					{#each stats.recentActivity as log (log.timestamp + log.itemName + log.performedBy)}
-						<li>
-							<strong>{log.performedBy}</strong>
-							{#if log.transactionType === 'RECEIVE'}
-								received {log.quantityChanged} units of {log.itemName}
-							{:else if log.transactionType === 'PICK'}
-								picked {Math.abs(log.quantityChanged)} units of {log.itemName}
-							{:else if log.quantityChanged < 0}
-								<!-- A relocation logs both of its sides, so the sign says which
+		<!-- The "Inventory Categories" box that sat beside this was a square drawn
+         with a border and labelled as a chart; the pie at the top replaced it. -->
+		<div class="panel">
+			<h3>System Activity</h3>
+			<ul class="activity-list">
+				{#if stats.recentActivity.length === 0}
+					<li>No recent activity to display.</li>
+				{/if}
+				{#each stats.recentActivity as log (log.timestamp + log.itemName + log.performedBy)}
+					<li>
+						<strong>{log.performedBy}</strong>
+						{#if log.transactionType === 'RECEIVE'}
+							received {log.quantityChanged} units of {log.itemName}
+						{:else if log.transactionType === 'PICK'}
+							picked {Math.abs(log.quantityChanged)} units of {log.itemName}
+						{:else if log.quantityChanged < 0}
+							<!-- A relocation logs both of its sides, so the sign says which
                     half of the move this row is. -->
-								relocated {Math.abs(log.quantityChanged)} units of {log.itemName} out of Bin {log.warehouseBinId}
-							{:else}
-								relocated {log.quantityChanged} units of {log.itemName} into Bin {log.warehouseBinId}
-							{/if}
-							<br />
-							<span
-								>{formatTimeAgo(log.timestamp)}{log.transactionType === 'RELOCATE'
-									? ''
-									: ` • Bin ${log.warehouseBinId}`}</span
-							>
-						</li>
-					{/each}
-				</ul>
-				<!-- There is no full log screen to open: the API returns the five entries
+							relocated {Math.abs(log.quantityChanged)} units of {log.itemName} out of Bin {log.warehouseBinId}
+						{:else}
+							relocated {log.quantityChanged} units of {log.itemName} into Bin {log.warehouseBinId}
+						{/if}
+						<br />
+						<span
+							>{formatTimeAgo(log.timestamp)}{log.transactionType === 'RELOCATE'
+								? ''
+								: ` • Bin ${log.warehouseBinId}`}</span
+						>
+					</li>
+				{/each}
+			</ul>
+			<!-- There is no full log screen to open: the API returns the five entries
            above and nothing else, so a working button would need a paged
            endpoint and a page to show it on. Marked the way the sidebar marks
            Reports and Settings rather than left looking clickable. -->
-				<span class="unbuilt">View All Logs<span class="tag">SOON</span></span>
-			</div>
+			<span class="unbuilt">View All Logs<span class="tag">SOON</span></span>
 		</div>
 
 		<div class="panel mt-1">
@@ -334,10 +326,18 @@
 		color: #a7f3d0;
 	}
 
-	.middle-grid {
+	.chart-row {
 		display: grid;
-		grid-template-columns: 2fr 1fr;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 1.5rem;
+		margin-bottom: 1.5rem;
+	}
+	/* On a narrow screen half the width is too little for a pie and a legend
+	   that can be read, so the charts stack instead. */
+	@media (max-width: 900px) {
+		.chart-row {
+			grid-template-columns: 1fr;
+		}
 	}
 	.panel {
 		background: white;
@@ -350,23 +350,6 @@
 		font-size: 1.1rem;
 		color: #0f172a;
 	}
-	.chart-placeholder {
-		display: flex;
-		align-items: center;
-		gap: 3rem;
-	}
-	.donut {
-		width: 150px;
-		height: 150px;
-		border: 20px solid #0b6b36;
-		border-radius: 20px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		text-align: center;
-		font-weight: bold;
-	}
-
 	.activity-list {
 		list-style: none;
 		padding: 0;

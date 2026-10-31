@@ -4,6 +4,7 @@
 	import ReceiveStockForm from '$lib/components/employee/ReceiveStockForm.svelte';
 	import PickStockForm from '$lib/components/employee/PickStockForm.svelte';
 	import RelocateStockForm from '$lib/components/employee/RelocateStockForm.svelte';
+	import PieChart from '$lib/components/shared/PieChart.svelte';
 	import { onMount } from 'svelte';
 	import { apiFetch, apiErrorMessage } from '$lib/api';
 	import { endExpiredSession, requireSession } from '$lib/auth';
@@ -23,12 +24,20 @@
 	// The counters across the top. Zeros until the API answers, rather than the
 	// invented figures that used to sit here - a brand new warehouse really does
 	// have nothing in it, and saying so beats saying 12,482.
-	let stats = $state({
+	let stats: {
+		unitsOnHand: number;
+		skusTracked: number;
+		lowStockCount: number;
+		receivedToday: number;
+		pickedToday: number;
+		stockByCategory: { category: string; units: number }[];
+	} = $state({
 		unitsOnHand: 0,
 		skusTracked: 0,
 		lowStockCount: 0,
 		receivedToday: 0,
-		pickedToday: 0
+		pickedToday: 0,
+		stockByCategory: []
 	});
 
 	// This table is an overview, not the master list, so it shows a page at a
@@ -127,6 +136,17 @@
          a barcode field that do not exist; updating stock is what the three
          tabs below this actually do, so a button that promised the same thing
          and delivered nothing was worse than no button. -->
+		</div>
+
+		<!-- Two equal columns, so the pie takes the left half and the right half is
+         held open for the chart that goes beside it. -->
+		<div class="chart-row">
+			<PieChart
+				title="Stock on Hand by Category"
+				slices={stats.stockByCategory.map((c) => ({ label: c.category, value: c.units }))}
+				loading={isLoading}
+				emptyText="No stock on hand yet."
+			/>
 		</div>
 
 		<!-- Every figure here is one the database can answer. The low-stock count is
@@ -308,6 +328,20 @@
 	.page-header p {
 		margin: 0;
 		color: #64748b;
+	}
+
+	.chart-row {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 1.5rem;
+		margin-bottom: 2rem;
+	}
+	/* On a narrow screen half the width is too little for a pie and a legend
+	   that can be read, so the charts stack instead. */
+	@media (max-width: 900px) {
+		.chart-row {
+			grid-template-columns: 1fr;
+		}
 	}
 
 	.stats-grid {
