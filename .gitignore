@@ -13,3 +13,9 @@ TestResults/
 # build showed up as changes to commit.
 [Bb]in/
 [Oo]bj/
+
+# Local agent notes, not for the repo
+agent.md
+
+# brag launch video output (local only)
+brag-output*/
